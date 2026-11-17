@@ -347,6 +347,13 @@ try {
   }
   assert.equal(switchedState.activeProjectId, initialProjectId);
   assert.equal(switchedState.projects.find((project) => project.id === managedProject.id).archivedAt, null);
+  let restoredProjectControlReady = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    restoredProjectControlReady = await evaluate(cdp, `Boolean(document.querySelector('[data-project-id="${managedProject.id}"]'))`);
+    if (restoredProjectControlReady) break;
+    await delay(100);
+  }
+  assert.equal(restoredProjectControlReady, true);
 
   await evaluate(cdp, `document.querySelector('[data-project-id="${managedProject.id}"]').click()`);
   for (let attempt = 0; attempt < 50; attempt += 1) {
