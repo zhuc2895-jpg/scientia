@@ -1270,3 +1270,56 @@ button.context-chip:hover { background: rgba(255,255,255,.52); color: var(--ink-
   .metric-row { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 8px; }
   .metric:nth-child(3) { border-right: 0; }
 }
+
+/* Research Project navigation and lifecycle */
+.project-section-heading { display: flex; align-items: center; justify-content: space-between; padding-right: 4px; }
+.project-section-heading .sidebar-section-label { padding-bottom: 6px; }
+.project-add-button {
+  width: 25px; height: 25px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.42);
+  color: var(--muted); cursor: pointer; font-size: 17px; line-height: 1; transition: .15s ease;
+}
+.project-add-button:hover { color: var(--ink); background: var(--panel); border-color: var(--line-strong); }
+.project-list { max-height: 190px; overflow-y: auto; padding: 0 2px 6px; display: grid; gap: 3px; }
+.project-empty { padding: 10px 9px 13px; color: var(--faint); font-size: 10.5px; line-height: 1.55; }
+.project-item {
+  min-width: 0; display: grid; grid-template-columns: 25px minmax(0,1fr) auto; align-items: center; gap: 8px;
+  min-height: 42px; padding: 5px 6px 5px 7px; border: 1px solid transparent; border-radius: 9px;
+  color: var(--ink-soft); cursor: pointer; transition: .15s ease;
+}
+.project-item:hover { background: rgba(255,255,255,.44); border-color: rgba(100,120,126,.1); }
+.project-item.active { background: rgba(255,255,255,.74); border-color: rgba(100,120,126,.18); box-shadow: 0 2px 8px rgba(35,40,48,.055); }
+.project-item.archived { opacity: .66; cursor: default; }
+.project-item-icon { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 7px; background: rgba(189,208,211,.48); color: #607e84; }
+.project-item-icon svg { width: 13px; height: 13px; }
+.project-item-copy { min-width: 0; }
+.project-item-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 620; }
+.project-item-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; color: var(--faint); font-family: var(--font-mono); font-size: 8px; }
+.project-item-actions { display: flex; align-items: center; gap: 3px; opacity: 0; transition: .15s ease; }
+.project-item:hover .project-item-actions, .project-item.active .project-item-actions { opacity: 1; }
+.project-action {
+  border: 0; border-radius: 5px; background: transparent; color: var(--faint); cursor: pointer;
+  padding: 3px 4px; font-family: var(--font-ui); font-size: 8.5px;
+}
+.project-action:hover { color: var(--ink); background: rgba(255,255,255,.72); }
+.project-action.danger:hover { color: var(--danger); }
+.project-archive-divider { padding: 8px 8px 3px; color: var(--faint); font-family: var(--font-mono); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+.project-dialog { width: min(620px, calc(100vw - 40px)); }
+.project-mode-label { margin-top: 20px; }
+.project-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.project-mode-card {
+  position: relative; display: block; padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: rgba(255,255,255,.32); cursor: pointer; transition: .15s ease;
+}
+.project-mode-card:hover { border-color: var(--line-strong); background: rgba(255,255,255,.62); }
+.project-mode-card:has(input:checked) { border-color: rgba(94,128,136,.46); box-shadow: inset 0 0 0 1px rgba(94,128,136,.12); background: rgba(255,255,255,.72); }
+.project-mode-card input { width: 14px !important; height: 14px !important; margin: 0 0 7px; }
+.project-mode-card span { display: block; }
+.project-mode-card strong { display: block; font-size: 11px; }
+.project-mode-card small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.project-import-fields { margin-top: 4px; }
+.dialog-footnote { color: var(--faint); font-family: var(--font-mono); font-size: 8px; line-height: 1.5; max-width: 280px; }
+@media (max-width: 520px) {
+  .project-mode-grid { grid-template-columns: 1fr; }
+  .dialog-footnote { display: none; }
+}

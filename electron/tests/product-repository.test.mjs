@@ -199,3 +199,139 @@ test('conversations require a workspace-bound project', (t) => {
 
   assert.throws(() => repository.createConversation(conversation()), /尚未绑定研究工作区/);
 });
+
+test('projects own isolated conversations and each project keeps its own active conversation', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const firstProject = repository.loadState().project;
+  const firstConversation = conversation();
+  repository.createConversation(firstConversation);
+  repository.setActiveConversation(firstConversation.id);
+
+  const secondProject = repository.createProject({
+    id: 'project-2',
+    name: 'Second Research Question',
+    workspacePath: 'C:/Research/Second-Project',
+    workspaceKind: 'imported',
+  });
+  const secondConversation = conversation({
+    id: 'conversation-2',
+    title: 'Second project thread',
+    createdAt: '2026-11-17T00:06:00.000Z',
+    updatedAt: '2026-11-17T00:06:00.000Z',
+  });
+  repository.createConversation(secondConversation);
+  repository.setActiveConversation(secondConversation.id);
+
+  let state = repository.loadState();
+  assert.equal(state.activeProjectId, secondProject.id);
+  assert.equal(state.project.workspacePath, 'C:/Research/Second-Project');
+  assert.deepEqual(state.conversations, [secondConversation]);
+  assert.equal(state.activeId, secondConversation.id);
+
+  repository.setActiveProject(firstProject.id);
+  state = repository.loadState();
+  assert.equal(state.activeProjectId, firstProject.id);
+  assert.equal(state.project.workspacePath, 'C:/Research/Test Project');
+  assert.deepEqual(state.conversations, [firstConversation]);
+  assert.equal(state.activeId, firstConversation.id);
+
+  repository.setActiveProject(secondProject.id);
+  assert.equal(repository.loadState().activeId, secondConversation.id);
+});
+
+test('conversation mutations cannot cross the active project boundary', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const firstProject = repository.loadState().project;
+  const firstConversation = conversation();
+  repository.createConversation(firstConversation);
+  repository.createProject({
+    id: 'project-2',
+    name: 'Other project',
+    workspacePath: 'C:/Research/Other-Project',
+    workspaceKind: 'managed',
+  });
+
+  assert.throws(() => repository.updateConversation(firstConversation), /不存在的会话/);
+  assert.throws(() => repository.deleteConversation(firstConversation.id), /不存在的会话/);
+  assert.throws(() => repository.setActiveConversation(firstConversation.id), /不存在的会话/);
+
+  repository.setActiveProject(firstProject.id);
+  assert.deepEqual(repository.loadState().conversations, [firstConversation]);
+});
+
+test('projects cannot share one research workspace', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  assert.throws(() => repository.createProject({
+    id: 'project-2',
+    name: 'Duplicate workspace',
+    workspacePath: 'c:/research/test project',
+    workspaceKind: 'imported',
+  }), /已经绑定/);
+});
+
+test('archive is reversible and leaves project conversations intact', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const archivedConversation = conversation();
+  repository.createConversation(archivedConversation);
+  const projectId = repository.loadState().activeProjectId;
+  const archivedProject = repository.archiveProject(projectId);
+  assert.equal(archivedProject.id, projectId);
+  assert.ok(archivedProject.archivedAt);
+  assert.equal(repository.loadState().archivedProjects.some((project) => project.id === archivedProject.id), true);
+  assert.throws(() => repository.setActiveProject(archivedProject.id), /已归档/);
+
+  const restored = repository.restoreProject(archivedProject.id);
+  assert.equal(restored.archivedAt, null);
+  assert.equal(repository.loadState().activeProjectId, archivedProject.id);
+  assert.deepEqual(repository.loadState().conversations, [archivedConversation]);
+});
+
+test('project deletion requires the exact project name and removes only project-owned records', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const project = repository.createProject({
+    id: 'project-2',
+    name: 'Delete Me Exactly',
+    workspacePath: 'C:/Research/Delete-Me',
+    workspaceKind: 'imported',
+  });
+  repository.createConversation(conversation());
+
+  assert.throws(() => repository.deleteProject({ id: project.id, confirmationName: 'delete me exactly' }), /项目名称/);
+  assert.equal(repository.loadState().activeProjectId, project.id);
+
+  const result = repository.deleteProject({ id: project.id, confirmationName: 'Delete Me Exactly' });
+  assert.equal(result.deletedProject.id, project.id);
+  assert.notEqual(repository.loadState().activeProjectId, project.id);
+  assert.equal(repository.loadState().projects.some((item) => item.id === project.id), false);
+  assert.equal(repository.loadState().conversations.length, 0);
+});

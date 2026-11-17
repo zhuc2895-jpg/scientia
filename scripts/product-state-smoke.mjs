@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -244,6 +244,107 @@ try {
   assert.equal(importGuard.forged.ok, false);
   assert.match(importGuard.forged.message, /导入授权无效或已过期/);
   console.log('OK   File imports require main-process authorization tokens');
+
+  const initialProjectId = created.activeProjectId;
+  await evaluate(cdp, `document.querySelector('#add-project').click()`);
+  assert.equal(await evaluate(cdp, `document.querySelector('#project-dialog').open`), true);
+  assert.equal(await evaluate(cdp, `Boolean(document.querySelector('#project-list').compareDocumentPosition(document.querySelector('#conversation-list')) & Node.DOCUMENT_POSITION_FOLLOWING)`), true);
+  await evaluate(cdp, `(() => {
+    document.querySelector('#project-name').value = 'Managed Project Smoke';
+    document.querySelector('#create-project').click();
+    return true;
+  })()`);
+  let managedState = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    managedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+    if (managedState.activeProjectId !== initialProjectId && managedState.projects.length === 2) break;
+    await delay(100);
+  }
+  const managedProject = managedState.projects.find((project) => project.id !== initialProjectId);
+  assert.ok(managedProject, 'managed project was not created');
+  assert.equal(managedState.activeProjectId, managedProject.id);
+  assert.equal(managedProject.workspaceKind, 'managed');
+  assert.equal(managedProject.workspacePath.startsWith(path.join(userData, 'managed-workspaces')), true);
+  assert.equal(managedState.conversations.length, 0);
+  let activeProjectLabel = '';
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    activeProjectLabel = await evaluate(cdp, `document.querySelector('.project-item.active .project-item-name')?.textContent || ''`);
+    if (activeProjectLabel === 'Managed Project Smoke') break;
+    await delay(100);
+  }
+  assert.equal(activeProjectLabel, 'Managed Project Smoke');
+  console.log('OK   A managed Research Project creates its own workspace and becomes the navigation root');
+
+  await evaluate(cdp, `document.querySelector('#new-research').click()`);
+  await delay(250);
+  const managedConversationState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+  assert.equal(managedConversationState.conversations.length, 1);
+  assert.equal(managedConversationState.activeProjectId, managedProject.id);
+  const managedInspection = await evaluate(cdp, 'window.scienceAgent.inspectWorkspace()');
+  assert.equal(managedInspection.workspace, managedProject.workspacePath);
+  const crossProjectRun = await evaluate(cdp, `window.scienceAgent.runAgent({
+    runId: 'cross-project-run',
+    conversationId: ${JSON.stringify(expectedId)},
+    prompt: 'This must not run in another project.',
+  }).then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message }))`);
+  assert.equal(crossProjectRun.ok, false);
+  assert.match(crossProjectRun.message, /当前 Research Project/);
+  console.log('OK   A Project cannot inspect or run another Project workspace');
+
+  await evaluate(cdp, `document.querySelector('[data-project-id="${initialProjectId}"]').click()`);
+  let switchedState = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    switchedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+    if (switchedState.activeProjectId === initialProjectId) break;
+    await delay(100);
+  }
+  assert.equal(switchedState.activeProjectId, initialProjectId);
+  assert.equal(switchedState.activeId, expectedId);
+  assert.equal(switchedState.conversations.length, 1);
+  let activeWorkspace = '';
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    activeWorkspace = (await evaluate(cdp, 'window.scienceAgent.configLoad()')).workspace;
+    if (activeWorkspace === workspace) break;
+    await delay(100);
+  }
+  assert.equal(activeWorkspace, workspace);
+  console.log('OK   Switching Projects changes the active workspace and conversation scope');
+
+  await evaluate(cdp, `window.confirm = () => true; document.querySelector('[data-archive-project="${managedProject.id}"]').click()`);
+  let archivedState = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    archivedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+    if (archivedState.archivedProjects.some((project) => project.id === managedProject.id)) break;
+    await delay(100);
+  }
+  assert.equal(archivedState.projects.find((project) => project.id === managedProject.id).archivedAt !== null, true);
+  assert.equal(await evaluate(cdp, `Boolean(document.querySelector('[data-restore-project="${managedProject.id}"]'))`), true);
+  assert.equal((await evaluate(cdp, 'window.scienceAgent.productStateLoad()')).conversations.length, 1);
+  console.log('OK   Project archive is reversible and preserves project data');
+
+  await evaluate(cdp, `document.querySelector('[data-restore-project="${managedProject.id}"]').click()`);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    switchedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+    if (switchedState.activeProjectId === managedProject.id) break;
+    await delay(100);
+  }
+  assert.equal(switchedState.activeProjectId, managedProject.id);
+  assert.equal(switchedState.conversations.length, 1);
+
+  await evaluate(cdp, `window.prompt = () => 'wrong name'; document.querySelector('[data-delete-project="${managedProject.id}"]').click()`);
+  await delay(250);
+  assert.equal((await evaluate(cdp, 'window.scienceAgent.productStateLoad()')).projects.some((project) => project.id === managedProject.id), true);
+  await evaluate(cdp, `window.prompt = () => 'Managed Project Smoke'; document.querySelector('[data-delete-project="${managedProject.id}"]').click()`);
+  let deletedState = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    deletedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+    if (!deletedState.projects.some((project) => project.id === managedProject.id)) break;
+    await delay(100);
+  }
+  assert.equal(deletedState.projects.some((project) => project.id === managedProject.id), false);
+  assert.equal(deletedState.activeProjectId, initialProjectId);
+  assert.equal(existsSync(managedProject.workspacePath), false);
+  console.log('OK   Project deletion requires the exact name and removes its managed workspace');
 
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);

@@ -69,6 +69,12 @@
         <button class="icon-button subtle" id="collapse-sidebar" title="收起侧栏" aria-label="收起侧栏"><svg><use href="#i-menu"/></svg></button>
       </div>
 
+      <div class="project-section-heading">
+        <span class="sidebar-section-label">Research Projects</span>
+        <button class="project-add-button" id="add-project" type="button" aria-label="新建 Research Project">+</button>
+      </div>
+      <nav class="project-list" id="project-list" aria-label="Research Projects"></nav>
+
       <button class="new-research-button" id="new-research" type="button">
         <svg><use href="#i-plus"/></svg>
         <span>新建研究</span>
@@ -77,11 +83,11 @@
 
       <label class="side-search">
         <svg><use href="#i-search"/></svg>
-        <input id="conversation-search" type="search" placeholder="搜索研究会话" autocomplete="off">
+        <input id="conversation-search" type="search" placeholder="搜索项目会话" autocomplete="off">
       </label>
 
-      <div class="sidebar-section-label">研究记录</div>
-      <nav class="conversation-list" id="conversation-list" aria-label="研究记录"></nav>
+      <div class="sidebar-section-label">Active Project Conversations</div>
+      <nav class="conversation-list" id="conversation-list" aria-label="当前项目的会话"></nav>
 
       <div class="agent-card">
         <div class="agent-avatar">
@@ -260,13 +266,58 @@
     </aside>
   </div>
 
+  <dialog class="settings-dialog project-dialog" id="project-dialog">
+    <form method="dialog" id="project-form">
+      <div class="dialog-header">
+        <div>
+          <div class="dialog-kicker">Research Project boundary</div>
+          <h2>新建 Research Project</h2>
+          <p>每个 Project 绑定一个 Research Workspace；会话、资料与产出都留在这个边界内。</p>
+        </div>
+        <button class="icon-button subtle" type="button" id="close-project" aria-label="关闭项目对话框"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <div class="dialog-body">
+        <label class="field-label" for="project-name">项目名称</label>
+        <input id="project-name" type="text" maxlength="120" placeholder="例如：CRISPR 脱靶效应综述" required>
+
+        <div class="field-label project-mode-label">Research Workspace</div>
+        <div class="project-mode-grid">
+          <label class="project-mode-card">
+            <input type="radio" name="project-mode" value="managed" checked>
+            <span><strong>由 SCIENTIA 管理</strong><small>在应用数据目录中创建独立工作区。</small></span>
+          </label>
+          <label class="project-mode-card">
+            <input type="radio" name="project-mode" value="imported">
+            <span><strong>导入已有目录</strong><small>复用现有资料；SCIENTIA 永远不会删除该外部目录。</small></span>
+          </label>
+        </div>
+
+        <div class="project-import-fields" id="project-import-fields" hidden>
+          <label class="field-label" for="project-workspace-path">已有目录</label>
+          <div class="workspace-picker">
+            <input id="project-workspace-path" type="text" readonly placeholder="选择一个已有研究目录">
+            <button type="button" class="secondary-button" id="choose-project-workspace">选择目录</button>
+          </div>
+          <div class="field-help">目录会被原地绑定，其中的文件不会复制或删除。</div>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <span class="dialog-footnote">Project 创建后，文件操作只会解析到它绑定的 Workspace。</span>
+        <div class="dialog-footer-actions">
+          <button type="button" class="secondary-button" id="cancel-project">取消</button>
+          <button type="submit" class="primary-button" id="create-project">创建项目</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="settings-dialog" id="settings-dialog">
     <form method="dialog" id="settings-form">
       <div class="dialog-header">
         <div>
           <div class="dialog-kicker">Science Agent runtime</div>
           <h2>设置</h2>
-          <p>连接 DeepSeek Harness，并指定唯一的研究工作区。</p>
+          <p>连接 DeepSeek Harness。Research Workspace 由当前 Project 绑定。</p>
         </div>
         <button class="icon-button subtle" type="button" id="close-settings" aria-label="关闭设置"><svg><use href="#i-x"/></svg></button>
       </div>
@@ -299,12 +350,12 @@
         <input id="base-url" type="url" placeholder="https://api.deepseek.com/v1" spellcheck="false">
         <div class="field-help">使用 OpenAI 兼容代理时填写；留空则使用 DeepSeek 官方路由。</div>
 
-        <label class="field-label" for="settings-workspace-path">研究目录</label>
+        <label class="field-label" for="settings-workspace-path">当前 Project 研究目录</label>
         <div class="workspace-picker">
           <input id="settings-workspace-path" type="text" readonly>
           <button type="button" class="secondary-button" id="choose-workspace">选择目录</button>
         </div>
-        <div class="field-help">Harness 会在此目录读取资料、执行工具并将产出写入 <code>.science/outputs/</code>。</div>
+        <div class="field-help">Harness 只会在此目录读取资料并将产出写入 <code>.science/outputs/</code>。已有会话的 Project 不能更换目录。</div>
 
         <div class="security-note">
           <svg><use href="#i-shield"/></svg>

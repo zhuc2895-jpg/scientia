@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, Tray } from 'electron';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -14,6 +15,7 @@ import { readRunManifest } from './run-recovery.js';
 import { captureSecretFromUser } from './native-secret-input.js';
 import { createImportAuthorizer } from './import-authorizer.js';
 import { resolveWorkspaceEntry } from './workspace-paths.js';
+import { removeManagedProjectWorkspace } from './project-workspace.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -25,6 +27,7 @@ let runtimeManager = null;
 let productRepository = null;
 let tray = null;
 const importAuthorizer = createImportAuthorizer();
+const projectWorkspaceAuthorizer = createImportAuthorizer();
 const appLifecycle = createAppLifecycle({
   app,
   getWindow: () => mainWindow,
@@ -63,12 +66,31 @@ async function readConfigFile() {
   }
 }
 
+let configWriteQueue = Promise.resolve();
+
 async function writeConfigFile(config) {
-  const target = configPath();
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  const temp = `${target}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(config, null, 2), 'utf8');
-  await fs.rename(temp, target);
+  const write = async () => {
+    const target = configPath();
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+    await fs.writeFile(temp, JSON.stringify(config, null, 2), 'utf8');
+    try {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await fs.rename(temp, target);
+          return;
+        } catch (error) {
+          if (!['EPERM', 'EBUSY', 'EACCES'].includes(error?.code) || attempt >= 5) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+        }
+      }
+    } finally {
+      await fs.rm(temp, { force: true }).catch(() => {});
+    }
+  };
+  const queued = configWriteQueue.then(write, write);
+  configWriteQueue = queued.catch(() => {});
+  return queued;
 }
 
 async function hydrateSecret(config) {
@@ -86,7 +108,7 @@ function publicConfig(config, harness) {
     baseUrl: config.baseUrl || '',
     model: config.model || DEFAULT_MODEL,
     maxTokens: Number(config.maxTokens) || DEFAULT_MAX_TOKENS,
-    workspace: config.workspace || defaultWorkspace(),
+    workspace: typeof config.workspace === 'string' ? config.workspace : defaultWorkspace(),
     apiKeyPresent: Boolean(sessionApiKey),
     apiKeyPersisted: Boolean(config.apiKeyEncrypted),
     safeStorageAvailable: safeStorage.isEncryptionAvailable(),
@@ -112,6 +134,34 @@ function currentProjectWorkspace() {
   const workspacePath = productRepository?.loadState().project?.workspacePath;
   if (!workspacePath) throw new Error('Research Project 尚未绑定研究工作区。');
   return normalizeWorkspace(workspacePath);
+}
+
+function managedWorkspacesRoot() {
+  return path.join(app.getPath('userData'), 'managed-workspaces');
+}
+
+function assertNoActiveResearchRun() {
+  const daemon = runtimeManager?.getState();
+  if (daemon?.activeRunId || daemon?.state === 'running') {
+    throw new Error('当前 Research Project 有研究运行，请先停止任务。');
+  }
+}
+
+async function syncActiveProjectWorkspace() {
+  const previous = await readConfigFile();
+  const state = productRepository.loadState();
+  const workspace = state.project?.workspacePath || '';
+  if (previous.workspace !== workspace) {
+    await writeConfigFile({ ...previous, workspace });
+  }
+  return state;
+}
+
+async function assertWorkspaceDirectory(workspacePath) {
+  const resolved = normalizeWorkspace(workspacePath);
+  const stat = await fs.stat(resolved);
+  if (!stat.isDirectory()) throw new Error('导入路径不是目录。');
+  return fs.realpath(resolved);
 }
 
 function pythonExecutable() {
@@ -376,6 +426,11 @@ async function importFiles(workspaceInput, tokens) {
 
 async function runAgent(payload, sender) {
   if (!runtimeManager) throw new Error('Science Agent runtime is not ready.');
+  const state = productRepository.loadState();
+  const conversationProjectId = productRepository.getConversationProjectId(payload?.conversationId);
+  if (!state.activeProjectId || conversationProjectId !== state.activeProjectId) {
+    throw new Error('只能运行当前 Research Project 中的研究会话。');
+  }
   return runtimeManager.run(payload, sender);
 }
 
@@ -392,6 +447,104 @@ function installIpc() {
     conversations: payload?.conversations,
     activeId: typeof payload?.activeId === 'string' ? payload.activeId : null,
   }));
+
+  ipcMain.handle('project:pick-import', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '导入已有 Research Workspace',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled) return null;
+    const workspacePath = result.filePaths[0];
+    const [token] = projectWorkspaceAuthorizer.authorize([workspacePath]);
+    return { token, path: workspacePath, suggestedName: path.basename(workspacePath) || 'Research Project' };
+  });
+
+  ipcMain.handle('project:create-managed', async (_event, payload) => {
+    assertNoActiveResearchRun();
+    const id = randomUUID();
+    const workspacePath = path.join(managedWorkspacesRoot(), id);
+    await fs.mkdir(workspacePath, { recursive: true });
+    try {
+      productRepository.createProject({
+        id,
+        name: payload?.name,
+        workspacePath,
+        workspaceKind: 'managed',
+      });
+    } catch (error) {
+      try {
+        await removeManagedProjectWorkspace({
+          managedRoot: managedWorkspacesRoot(),
+          project: { workspacePath, workspaceKind: 'managed' },
+        });
+      } catch { /* preserve the original creation error */ }
+      throw error;
+    }
+    return syncActiveProjectWorkspace();
+  });
+
+  ipcMain.handle('project:create-imported', async (_event, payload) => {
+    assertNoActiveResearchRun();
+    const token = typeof payload?.token === 'string' ? payload.token : '';
+    const [grantedPath] = projectWorkspaceAuthorizer.consume(token ? [token] : []);
+    if (!grantedPath) throw new Error('导入目录授权无效或已过期，请重新选择。');
+    const workspacePath = await assertWorkspaceDirectory(grantedPath);
+    productRepository.createProject({
+      id: randomUUID(),
+      name: payload?.name || path.basename(workspacePath),
+      workspacePath,
+      workspaceKind: 'imported',
+    });
+    return syncActiveProjectWorkspace();
+  });
+
+  ipcMain.handle('project:activate', async (_event, id) => {
+    assertNoActiveResearchRun();
+    const project = productRepository.getProject(id);
+    if (!project) throw new Error('无法选择不存在的 Research Project。');
+    await assertWorkspaceDirectory(project.workspacePath);
+    productRepository.setActiveProject(id);
+    return syncActiveProjectWorkspace();
+  });
+
+  ipcMain.handle('project:archive', async (_event, id) => {
+    assertNoActiveResearchRun();
+    productRepository.archiveProject(id);
+    return syncActiveProjectWorkspace();
+  });
+
+  ipcMain.handle('project:restore', async (_event, id) => {
+    assertNoActiveResearchRun();
+    const project = productRepository.getProject(id);
+    if (!project) throw new Error('无法恢复不存在的 Research Project。');
+    await assertWorkspaceDirectory(project.workspacePath);
+    productRepository.restoreProject(id);
+    return syncActiveProjectWorkspace();
+  });
+
+  ipcMain.handle('project:delete', async (_event, payload) => {
+    assertNoActiveResearchRun();
+    const project = productRepository.getProject(payload?.id);
+    if (!project) throw new Error('无法删除不存在的 Research Project。');
+    const result = productRepository.deleteProject({
+      id: project.id,
+      confirmationName: payload?.confirmationName,
+    });
+    let workspaceCleanupWarning = '';
+    if (project.workspaceKind === 'managed') {
+      try {
+        await removeManagedProjectWorkspace({
+          managedRoot: managedWorkspacesRoot(),
+          project,
+        });
+      } catch (error) {
+        workspaceCleanupWarning = error.message || '受管理研究工作区未能删除。';
+      }
+    }
+    const state = await syncActiveProjectWorkspace();
+    return { ...state, ...result, workspaceCleanupWarning };
+  });
+
   ipcMain.handle('conversation:create', (_event, conversation) => productRepository.createConversation(conversation));
   ipcMain.handle('conversation:update', (_event, conversation) => productRepository.updateConversation(conversation));
   ipcMain.handle('conversation:delete', (_event, id) => productRepository.deleteConversation(id));
@@ -417,7 +570,7 @@ function installIpc() {
     const previous = await readConfigFile();
     if (typeof payload?.workspace !== 'string') throw new Error('请选择研究目录。');
     const requestedWorkspace = normalizeWorkspace(payload.workspace);
-    productRepository.validateWorkspaceBinding(requestedWorkspace);
+    const activeProject = productRepository.validateWorkspaceBinding(requestedWorkspace);
     const workspace = await ensureWorkspace(requestedWorkspace);
     const next = {
       ...previous,
@@ -426,7 +579,8 @@ function installIpc() {
       maxTokens: Math.min(200000, Math.max(4096, Number(payload.maxTokens) || DEFAULT_MAX_TOKENS)),
       workspace,
     };
-    productRepository.rebindWorkspace(workspace);
+    const workspaceChanged = path.resolve(activeProject.workspacePath).toLowerCase() !== path.resolve(workspace).toLowerCase();
+    if (workspaceChanged) productRepository.rebindWorkspace(workspace);
     try {
       await writeConfigFile(next);
     } catch (error) {
