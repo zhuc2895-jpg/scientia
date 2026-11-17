@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { conversationSnapshot, reconcileRunManifest, recoverInterruptedRuns } from '../../app/conversation-state.js';
+import {
+  archiveRecoveredRunForContinuation,
+  buildRunContinuationPrompt,
+  conversationSnapshot,
+  reconcileRunManifest,
+  recoverInterruptedRuns,
+} from '../../app/conversation-state.js';
 
 test('restart recovery marks a running message needs-review and preserves its run association', () => {
   const conversation = {
@@ -129,4 +135,63 @@ test('a terminal Run Manifest overrides provisional review state', () => {
   assert.deepEqual(reconciled.messages[0].usage, { totalTokens: 1234 });
   assert.equal(reconciled.lastRecoveredRun.status, 'completed');
   assert.equal(reconciled.lastRecoveredRun.manifestPath, '.science/runs/conversation-3/run-3/manifest.json');
+});
+
+test('continuing a recovered run archives the old run before the next run starts', () => {
+  const conversation = {
+    id: 'conversation-4',
+    title: 'Continue research',
+    messages: [{
+      id: 'assistant-4',
+      role: 'assistant',
+      status: 'needs-review',
+      statusText: '应用重启，运行已中断，需要复核后可继续',
+      runId: 'run-4',
+    }],
+    activeRun: {
+      runId: 'run-4',
+      assistantId: 'assistant-4',
+      status: 'running',
+      recoveryStatus: 'needs-review',
+      manifestPath: '.science/runs/conversation-4/run-4/manifest.json',
+    },
+  };
+
+  const continued = archiveRecoveredRunForContinuation(conversation, {
+    continuedAt: '2026-11-17T01:00:00.000Z',
+    nextRunId: 'run-5',
+  });
+
+  assert.equal(continued.activeRun, null);
+  assert.equal(continued.recoveredRuns.length, 1);
+  assert.equal(continued.recoveredRuns[0].runId, 'run-4');
+  assert.equal(continued.recoveredRuns[0].resolution, 'continued');
+  assert.equal(continued.recoveredRuns[0].continuedByRunId, 'run-5');
+  assert.equal(continued.messages[0].continuationRunId, 'run-5');
+  assert.match(continued.messages[0].statusText, /已转入新一轮继续研究/);
+  assert.equal(conversation.activeRun.runId, 'run-4');
+});
+
+test('continuation brief carries manifest context without asking to replay side effects', () => {
+  const conversation = {
+    id: 'conversation-5',
+    title: 'Continuation brief',
+    messages: [{ id: 'assistant-5', role: 'assistant', content: 'Partial evidence summary', status: 'needs-review' }],
+    activeRun: {
+      runId: 'run-5',
+      assistantId: 'assistant-5',
+      status: 'running',
+      recoveryStatus: 'needs-review',
+      manifestPath: '.science/runs/conversation-5/run-5/manifest.json',
+      manifest: { status: 'running', lastStep: 'Searching literature' },
+    },
+  };
+
+  const prompt = buildRunContinuationPrompt(conversation, 'assistant-5');
+
+  assert.match(prompt, /run-5/);
+  assert.match(prompt, /\.science\/runs\/conversation-5\/run-5\/manifest\.json/);
+  assert.match(prompt, /Searching literature/);
+  assert.match(prompt, /Partial evidence summary/);
+  assert.match(prompt, /Do not repeat completed tool actions/);
 });

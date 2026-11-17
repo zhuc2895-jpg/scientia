@@ -1,4 +1,11 @@
-import { conversationSnapshot, reconcileRunManifest, recoverInterruptedRuns, tryNormalizeConversation } from './conversation-state.js';
+import {
+  archiveRecoveredRunForContinuation,
+  buildRunContinuationPrompt,
+  conversationSnapshot,
+  reconcileRunManifest,
+  recoverInterruptedRuns,
+  tryNormalizeConversation,
+} from './conversation-state.js';
 
 const bridge = window.scienceAgent ?? createPreviewBridge();
 const isPreview = !window.scienceAgent;
@@ -456,7 +463,9 @@ function emptyAssistantMarkup(message) {
     return `<div class="message-cancelled">${escapeHTML(message.content || '研究任务已停止。')}</div>`;
   }
   if (message.status === 'needs-review') {
-    return `<div class="message-needs-review"><strong>运行已中断，需要复核</strong><span>${escapeHTML(message.statusText || '应用重启前的研究运行尚未完成。')}</span></div>${message.content ? `<div class="markdown">${renderMarkdown(message.content)}</div>` : ''}`;
+    const conversation = activeConversation();
+    const canContinue = conversation?.activeRun?.assistantId === message.id && conversation.activeRun.recoveryStatus === 'needs-review';
+    return `<div class="message-needs-review"><strong>运行已中断，需要复核</strong><span>${escapeHTML(message.statusText || '应用重启前的研究运行尚未完成。')}</span>${canContinue ? '<button type="button" class="continue-run-button" data-continue-run="true">复核并继续研究</button>' : ''}</div>${message.content ? `<div class="markdown">${renderMarkdown(message.content)}</div>` : ''}`;
   }
   return `<div class="markdown">${renderMarkdown(message.content || '任务已完成，但没有返回文本。')}</div>${artifactMarkup(message)}`;
 }
@@ -836,9 +845,9 @@ function handleAgentEvent(event) {
   if (event.type === 'error') failRun(event);
 }
 
-async function sendResearchTask() {
+async function sendResearchTask({ promptOverride = null, displayContent = null, continuation = false } = {}) {
   if (state.activeRun) return;
-  const text = els.prompt.value.trim();
+  const text = (promptOverride ?? els.prompt.value).trim();
   if (!text && !state.pendingAttachments.length) return;
   if (!state.config?.apiKeyPresent) {
     openSettings();
@@ -859,12 +868,18 @@ async function sendResearchTask() {
   const assistantId = uid();
   const createdAt = nowISO();
   const userContent = text || '请先检查我附上的研究资料，并告诉我下一步最可靠的处理方式。';
+  const continuationOfRunId = continuation ? conversation.activeRun?.runId || null : null;
+
+  if (continuation) {
+    conversation = archiveRecoveredRunForContinuation(conversation, { continuedAt: createdAt, nextRunId: runId });
+    state.conversations = state.conversations.map((item) => item.id === conversation.id ? conversation : item);
+  }
 
   if (conversation.title === '新的研究') {
     conversation.title = userContent.replace(/\s+/g, ' ').slice(0, 26) || '新的研究';
   }
   conversation.messages.push({
-    id: uid(), role: 'user', content: userContent, attachments, createdAt,
+    id: uid(), role: 'user', content: displayContent || userContent, attachments, continuationOfRunId, createdAt,
   });
   conversation.messages.push({
     id: assistantId, role: 'assistant', content: '', status: 'running', statusText: '正在装载研究上下文', runId, createdAt,
@@ -891,8 +906,10 @@ async function sendResearchTask() {
     status: 'running',
   };
   state.pendingAttachments = [];
-  els.prompt.value = '';
-  autoResizeTextarea();
+  if (promptOverride === null) {
+    els.prompt.value = '';
+    autoResizeTextarea();
+  }
   void persistConversation(conversation);
   renderAll();
   scrollMessagesToBottom();
@@ -910,6 +927,22 @@ async function sendResearchTask() {
   } catch (error) {
     failRun({ message: error.message || '无法启动研究任务。' });
   }
+}
+
+async function continueRecoveredRun(messageId) {
+  const conversation = activeConversation();
+  const run = conversation?.activeRun;
+  if (!conversation || !run || run.assistantId !== messageId || run.recoveryStatus !== 'needs-review') {
+    showToast('没有可继续的已恢复研究运行。');
+    return;
+  }
+  const message = conversation.messages.find((item) => item.id === messageId);
+  const continuationPrompt = buildRunContinuationPrompt(conversation, messageId);
+  await sendResearchTask({
+    promptOverride: continuationPrompt,
+    displayContent: '复核上一轮已中断的研究进度，并从安全位置继续。',
+    continuation: true,
+  });
 }
 
 async function stopResearchTask() {
@@ -1159,6 +1192,12 @@ function bindEvents() {
   });
 
   els.messages.addEventListener('click', async (event) => {
+    const continueRun = event.target.closest('[data-continue-run]');
+    if (continueRun) {
+      const messageId = activeConversation()?.activeRun?.assistantId;
+      if (messageId) await continueRecoveredRun(messageId);
+      return;
+    }
     const openArtifact = event.target.closest('[data-open-artifact]');
     if (openArtifact) {
       void bridge.openPath(state.config.workspace, openArtifact.dataset.openArtifact);

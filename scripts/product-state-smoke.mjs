@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -150,6 +150,17 @@ async function findProductDatabaseFiles(directory) {
   return matches;
 }
 
+async function findFile(directory, filename) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      const match = await findFile(absolute, filename);
+      if (match) return match;
+    } else if (entry.name === filename) return absolute;
+  }
+  return null;
+}
+
 async function stopApp({ graceful = true } = {}) {
   if (graceful && socket && child && child.exitCode === null) {
     try {
@@ -289,6 +300,7 @@ try {
   assert.equal(recoveredConversation.activeRun.runId, 'interrupted-run');
   assert.equal(recoveredConversation.activeRun.manifest.lastStep, 'Extracting evidence');
   assert.equal(recoveredConversation.activeRun.manifestPath, `.science/runs/${expectedId}/interrupted-run/manifest.json`);
+  assert.equal(await evaluate(cdp, `Boolean(document.querySelector('[data-continue-run]'))`), true);
   console.log('OK   Interrupted runs recover as needs-review with their run association');
 
   await evaluate(cdp, `(() => {
@@ -340,6 +352,18 @@ try {
   assert.equal(migratedState.conversations.length, 1);
   assert.equal(migratedState.conversations[0].messages[0].content, 'Migrate me once.');
   console.log('OK   Browser-local conversations migrate once through the application');
+
+  await stopApp();
+  const configPath = await findFile(userData, 'science-agent.json');
+  assert.ok(configPath, 'application config file was not found');
+  const staleConfig = JSON.parse(readFileSync(configPath, 'utf8'));
+  staleConfig.workspace = 'C:\\Research\\Stale-Workspace';
+  writeFileSync(configPath, JSON.stringify(staleConfig, null, 2), 'utf8');
+  cdp = await connect(await launchApp());
+  await waitForRenderer(cdp);
+  const repairedConfig = await evaluate(cdp, 'window.scienceAgent.configLoad()');
+  assert.equal(repairedConfig.workspace, migratedState.project.workspacePath);
+  console.log('OK   The project workspace remains canonical across config writes');
 } finally {
   await stopApp();
   rmSync(userData, { recursive: true, force: true });

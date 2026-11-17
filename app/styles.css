@@ -232,6 +232,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .message-cancelled { color: var(--muted); font-size: 12px; padding: 8px 0; }
 .message-needs-review { display: grid; gap: 4px; border: 1px solid color-mix(in srgb, var(--brass) 28%, var(--line)); background: color-mix(in srgb, var(--brass) 8%, transparent); border-radius: 12px; padding: 12px 14px; color: var(--ink); font-size: 12px; line-height: 1.6; }
 .message-needs-review strong { color: var(--brass); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.continue-run-button { justify-self: start; margin-top: 6px; border: 1px solid color-mix(in srgb, var(--brass) 42%, var(--line)); background: var(--panel); color: var(--brass); border-radius: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
+.continue-run-button:hover { background: var(--brass-soft); }
 
 .markdown { color: var(--ink-soft); font-size: 13.5px; line-height: 1.78; overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }

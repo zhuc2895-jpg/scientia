@@ -422,11 +422,11 @@ function installIpc() {
       nextSessionApiKey = '';
       next.apiKeyEncrypted = '';
     }
-    await writeConfigFile(next);
+    productRepository.rebindWorkspace(workspace);
     try {
-      productRepository.rebindWorkspace(workspace);
+      await writeConfigFile(next);
     } catch (error) {
-      await writeConfigFile(previous);
+      try { productRepository.rebindWorkspace(previous.workspace); } catch { /* the database remains canonical */ }
       throw error;
     }
     sessionApiKey = nextSessionApiKey;
@@ -521,8 +521,15 @@ if (!singleInstance) {
     const config = await readConfigFile();
     sessionApiKey = await hydrateSecret(config);
     productRepository = openProductRepository({ databasePath: productDatabasePath() });
-    productRepository.ensureProject({ workspacePath: config.workspace || defaultWorkspace() });
-    await ensureWorkspace(config.workspace || defaultWorkspace());
+    const configuredWorkspace = config.workspace || defaultWorkspace();
+    const project = productRepository.loadState().project;
+    const workspace = project?.workspacePath || configuredWorkspace;
+    if (!project?.workspacePath) productRepository.ensureProject({ workspacePath: workspace });
+    if (config.workspace !== workspace) {
+      config.workspace = workspace;
+      await writeConfigFile(config);
+    }
+    await ensureWorkspace(workspace);
     runtimeManager = createDaemonManager({
       app,
       rootPath: ROOT,
