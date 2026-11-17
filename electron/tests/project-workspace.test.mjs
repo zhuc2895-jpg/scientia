@@ -54,3 +54,20 @@ test('managed project deletion rejects a path outside the managed root', async (
   }), /受管理目录/);
   assert.equal(await readFile(path.join(outside, 'secret.md'), 'utf8'), 'keep');
 });
+
+test('managed cleanup refuses to delete a nested imported workspace', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'scientia-managed-nested-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const managedRoot = path.join(root, 'managed');
+  const workspace = path.join(managedRoot, 'project-2');
+  const imported = path.join(workspace, 'external-import');
+  await mkdir(imported, { recursive: true });
+  await writeFile(path.join(imported, 'paper.md'), 'keep me');
+
+  await assert.rejects(removeManagedProjectWorkspace({
+    managedRoot,
+    project: { workspacePath: workspace, workspaceKind: 'managed' },
+    protectedPaths: [imported],
+  }), /其他 Research Workspace/);
+  assert.equal(await readFile(path.join(imported, 'paper.md'), 'utf8'), 'keep me');
+});

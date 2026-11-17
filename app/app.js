@@ -23,7 +23,6 @@ const state = {
   runtime: null,
   daemon: null,
   projects: [],
-  archivedProjects: [],
   activeProjectId: null,
   project: null,
   conversations: [],
@@ -205,7 +204,6 @@ function activeProject() {
 
 function applyProductState(productState) {
   state.projects = Array.isArray(productState?.projects) ? productState.projects : [];
-  state.archivedProjects = Array.isArray(productState?.archivedProjects) ? productState.archivedProjects : [];
   state.activeProjectId = productState?.activeProjectId || productState?.project?.id || null;
   state.project = productState?.project || null;
   state.conversations = Array.isArray(productState?.conversations) ? productState.conversations : [];
@@ -417,16 +415,16 @@ function projectItemMarkup(project, { archived = false } = {}) {
 }
 
 function renderProjectList() {
-  const openProjects = state.projects.filter((project) => !project.archivedAt);
+  const unarchivedProjects = state.projects.filter((project) => !project.archivedAt);
   const archivedProjects = state.projects.filter((project) => project.archivedAt);
-  if (!openProjects.length && !archivedProjects.length) {
+  if (!unarchivedProjects.length && !archivedProjects.length) {
     els.projectList.innerHTML = '<div class="project-empty">还没有 Research Project。先创建一个独立研究工作区。</div>';
     return;
   }
   els.projectList.innerHTML = [
-    ...openProjects.map((project) => projectItemMarkup(project)),
+    ...unarchivedProjects.map((project) => projectItemMarkup(project)),
     ...(archivedProjects.length ? [
-      '<div class="project-archive-divider">Archived Projects</div>',
+      '<div class="project-archive-divider">Archived Research Projects</div>',
       ...archivedProjects.map((project) => projectItemMarkup(project, { archived: true })),
     ] : []),
   ].join('');
@@ -752,6 +750,15 @@ async function chooseProjectImport() {
   }
 }
 
+async function prepareProjectMutation() {
+  if (state.activeRun) {
+    showToast('请先停止当前研究任务。');
+    return false;
+  }
+  await Promise.allSettled([...conversationWrites.values()]);
+  return true;
+}
+
 async function finishProjectMutation(productState, message) {
   applyProductState(productState);
   state.pendingAttachments = [];
@@ -765,12 +772,8 @@ async function finishProjectMutation(productState, message) {
 
 async function switchProject(id) {
   if (!id || id === state.activeProjectId) return;
-  if (state.activeRun) {
-    showToast('请先停止当前研究任务，再切换 Research Project。');
-    return;
-  }
+  if (!await prepareProjectMutation()) return;
   try {
-    await Promise.allSettled([...conversationWrites.values()]);
     const productState = await bridge.projectActivate(id);
     await finishProjectMutation(productState);
   } catch (error) {
@@ -781,25 +784,18 @@ async function switchProject(id) {
 async function archiveProject(id) {
   const project = state.projects.find((item) => item.id === id);
   if (!project) return;
-  if (state.activeRun) {
-    showToast('请先停止当前研究任务。');
-    return;
-  }
-  if (!window.confirm(`归档“${project.name}”？项目和已保存内容会保留，可随时恢复。`)) return;
+  if (!await prepareProjectMutation()) return;
+  if (!window.confirm(`归档“${project.name}”？Research Project 和已保存内容会保留，可随时恢复。`)) return;
   try {
-    await Promise.allSettled([...conversationWrites.values()]);
     const productState = await bridge.projectArchive(id);
-    await finishProjectMutation(productState, 'Research Project 已归档，数据已保留。');
+    await finishProjectMutation(productState, 'Research Project 已进入 Project Archival，数据已保留。');
   } catch (error) {
     showToast(error.message || '无法归档 Research Project。');
   }
 }
 
 async function restoreProject(id) {
-  if (state.activeRun) {
-    showToast('请先停止当前研究任务。');
-    return;
-  }
+  if (!await prepareProjectMutation()) return;
   try {
     const productState = await bridge.projectRestore(id);
     await finishProjectMutation(productState, 'Research Project 已恢复。');
@@ -811,10 +807,7 @@ async function restoreProject(id) {
 async function deleteProject(id) {
   const project = state.projects.find((item) => item.id === id);
   if (!project) return;
-  if (state.activeRun && state.activeProjectId === id) {
-    showToast('请先停止当前研究任务。');
-    return;
-  }
+  if (!await prepareProjectMutation()) return;
   const consequence = project.workspaceKind === 'managed'
     ? '项目记录和 SCIENTIA 管理的内部工作区都会被删除'
     : '仅删除 SCIENTIA 中的项目记录，外部研究目录不会被删除';
@@ -825,17 +818,16 @@ async function deleteProject(id) {
   );
   if (confirmationName === null) return;
   if (confirmationName !== project.name) {
-    showToast('项目名称确认不一致，未执行删除。');
+    showToast('Research Project 名称确认不一致，未执行删除。');
     return;
   }
   try {
-    await Promise.allSettled([...conversationWrites.values()]);
     const productState = await bridge.projectDelete({ id, confirmationName });
     await finishProjectMutation(productState);
     if (productState.workspaceCleanupWarning) {
       showToast(`项目已删除，但内部工作区清理失败：${productState.workspaceCleanupWarning}`, 6000);
     } else {
-      showToast(project.workspaceKind === 'managed' ? 'Research Project 和管理工作区已删除。' : 'Research Project 已删除，外部目录保持不变。');
+      showToast(project.workspaceKind === 'managed' ? 'Research Project 和受管理 Research Workspace 已删除。' : 'Research Project 已删除，外部 Research Workspace 保持不变。');
     }
   } catch (error) {
     showToast(error.message || '无法删除 Research Project。');
@@ -844,10 +836,7 @@ async function deleteProject(id) {
 
 async function submitProject(event) {
   event.preventDefault();
-  if (state.activeRun) {
-    showToast('请先停止当前研究任务。');
-    return;
-  }
+  if (!await prepareProjectMutation()) return;
   const name = els.projectName.value.trim();
   if (!name) {
     showToast('请填写 Research Project 名称。');
@@ -1442,14 +1431,6 @@ function bindEvents() {
       els.projectImportFields.hidden = selectedProjectMode() !== 'imported';
     });
   });
-  $('#choose-workspace').addEventListener('click', async () => {
-    try {
-      const selected = await bridge.pickWorkspace();
-      if (selected) els.workspacePathInput.value = selected;
-    } catch (error) {
-      showToast(error.message || '无法选择目录。');
-    }
-  });
   els.setApiKey.addEventListener('click', () => void captureApiKey());
   els.clearApiKey.addEventListener('click', () => void clearApiKey());
   $('#open-runtime-folder').addEventListener('click', () => { void bridge.openData(); });
@@ -1743,8 +1724,8 @@ function createPreviewBridge() {
       const project = previewProjects.find((item) => item.id === id);
       if (!project) throw new Error('无法恢复 Research Project。');
       project.archivedAt = null;
-      previewActiveProjectId = id;
-      previewConfig.workspace = project.workspacePath;
+      if (!previewProject()) previewActiveProjectId = id;
+      previewConfig.workspace = previewProject()?.workspacePath || '';
       return previewProductState();
     },
     async projectDelete({ id }) {
@@ -1777,7 +1758,6 @@ function createPreviewBridge() {
     },
     async conversationSetActive(id) { previewActiveConversationByProject.set(previewActiveProjectId, id); return id; },
     flushProductState() { return { ok: true }; },
-    async pickWorkspace() { return previewWorkspace; },
     async inspectWorkspace() {
       return {
         workspace: previewWorkspace,

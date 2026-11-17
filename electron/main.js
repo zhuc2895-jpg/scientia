@@ -127,12 +127,12 @@ function normalizeWorkspace(value) {
 
 async function ensureWorkspace(workspace) {
   await fs.mkdir(workspace, { recursive: true });
-  return workspace;
+  return fs.realpath(workspace);
 }
 
 function currentProjectWorkspace() {
   const workspacePath = productRepository?.loadState().project?.workspacePath;
-  if (!workspacePath) throw new Error('Research Project 尚未绑定研究工作区。');
+  if (!workspacePath) throw new Error('Research Project 尚未绑定 Research Workspace。');
   return normalizeWorkspace(workspacePath);
 }
 
@@ -517,7 +517,6 @@ function installIpc() {
     assertNoActiveResearchRun();
     const project = productRepository.getProject(id);
     if (!project) throw new Error('无法恢复不存在的 Research Project。');
-    await assertWorkspaceDirectory(project.workspacePath);
     productRepository.restoreProject(id);
     return syncActiveProjectWorkspace();
   });
@@ -536,6 +535,7 @@ function installIpc() {
         await removeManagedProjectWorkspace({
           managedRoot: managedWorkspacesRoot(),
           project,
+          protectedPaths: productRepository.loadState().projects.map((item) => item.workspacePath),
         });
       } catch (error) {
         workspaceCleanupWarning = error.message || '受管理研究工作区未能删除。';
@@ -568,10 +568,15 @@ function installIpc() {
 
   ipcMain.handle('config:save', async (_event, payload) => {
     const previous = await readConfigFile();
-    if (typeof payload?.workspace !== 'string') throw new Error('请选择研究目录。');
+    if (typeof payload?.workspace !== 'string') throw new Error('请选择一个 Research Project。');
+    const state = productRepository.loadState();
+    if (!state.project?.workspacePath) throw new Error('Research Project 尚未绑定 Research Workspace。');
     const requestedWorkspace = normalizeWorkspace(payload.workspace);
-    const activeProject = productRepository.validateWorkspaceBinding(requestedWorkspace);
-    const workspace = await ensureWorkspace(requestedWorkspace);
+    const workspace = normalizeWorkspace(state.project.workspacePath);
+    if (path.resolve(requestedWorkspace).toLowerCase() !== path.resolve(workspace).toLowerCase()) {
+      throw new Error('Research Project 的 Research Workspace 绑定在创建后不可更换。');
+    }
+    await ensureWorkspace(workspace);
     const next = {
       ...previous,
       baseUrl: typeof payload.baseUrl === 'string' ? payload.baseUrl.trim().replace(/\/+$/, '') : '',
@@ -579,14 +584,7 @@ function installIpc() {
       maxTokens: Math.min(200000, Math.max(4096, Number(payload.maxTokens) || DEFAULT_MAX_TOKENS)),
       workspace,
     };
-    const workspaceChanged = path.resolve(activeProject.workspacePath).toLowerCase() !== path.resolve(workspace).toLowerCase();
-    if (workspaceChanged) productRepository.rebindWorkspace(workspace);
-    try {
-      await writeConfigFile(next);
-    } catch (error) {
-      try { productRepository.rebindWorkspace(previous.workspace); } catch { /* the database remains canonical */ }
-      throw error;
-    }
+    await writeConfigFile(next);
     cachedHarnessStatus = null;
     if (runtimeManager) await runtimeManager.restart();
     return publicConfig(next, await checkHarness());
@@ -597,14 +595,6 @@ function installIpc() {
     return saveApiKey(apiKey);
   });
   ipcMain.handle('secret:clear-api-key', async () => saveApiKey(''));
-
-  ipcMain.handle('workspace:pick', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: '选择研究目录',
-      properties: ['openDirectory', 'createDirectory'],
-    });
-    return result.canceled ? null : result.filePaths[0];
-  });
 
   ipcMain.handle('workspace:inspect', async () => inspectWorkspace(currentProjectWorkspace()));
   ipcMain.handle('workspace:open', async () => shell.openPath(await ensureWorkspace(currentProjectWorkspace())));
@@ -687,13 +677,12 @@ if (!singleInstance) {
     productRepository = openProductRepository({ databasePath: productDatabasePath() });
     const configuredWorkspace = config.workspace || defaultWorkspace();
     const project = productRepository.loadState().project;
-    const workspace = project?.workspacePath || configuredWorkspace;
+    const workspace = await ensureWorkspace(project?.workspacePath || configuredWorkspace);
     if (!project?.workspacePath) productRepository.ensureProject({ workspacePath: workspace });
     if (config.workspace !== workspace) {
       config.workspace = workspace;
       await writeConfigFile(config);
     }
-    await ensureWorkspace(workspace);
     runtimeManager = createDaemonManager({
       app,
       rootPath: ROOT,

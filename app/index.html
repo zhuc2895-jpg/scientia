@@ -86,7 +86,7 @@
         <input id="conversation-search" type="search" placeholder="搜索项目会话" autocomplete="off">
       </label>
 
-      <div class="sidebar-section-label">Active Project Conversations</div>
+      <div class="sidebar-section-label">Active Research Project Conversations</div>
       <nav class="conversation-list" id="conversation-list" aria-label="当前项目的会话"></nav>
 
       <div class="agent-card">
@@ -114,7 +114,7 @@
               <h1 id="conversation-title">新的研究</h1>
               <button class="conversation-delete" id="delete-conversation" title="删除此研究会话" aria-label="删除此研究会话"><svg><use href="#i-trash"/></svg></button>
             </div>
-            <div class="conversation-subtitle" id="workspace-subtitle">选择一个研究目录开始</div>
+            <div class="conversation-subtitle" id="workspace-subtitle">选择一个 Research Workspace 开始</div>
           </div>
         </div>
         <div class="topbar-actions">
@@ -178,7 +178,7 @@
 
       <div class="composer-region">
         <div class="context-row">
-          <button type="button" class="context-chip" id="context-workspace" title="打开研究工作区"><svg><use href="#i-folder"/></svg><span id="context-workspace-name">研究工作区</span></button>
+          <button type="button" class="context-chip" id="context-workspace" title="打开 Research Workspace"><svg><use href="#i-folder"/></svg><span id="context-workspace-name">研究工作区</span></button>
           <span class="context-separator"></span>
           <span class="context-chip static"><svg><use href="#i-command"/></svg><span>Science Agent · 单 Agent</span></span>
           <button type="button" class="context-chip push-right" id="context-files"><svg><use href="#i-paperclip"/></svg><span>选择资料</span></button>
@@ -222,13 +222,13 @@
           <div class="inspector-kicker">Research record // local</div>
           <h2>研究上下文</h2>
         </div>
-        <button class="icon-button subtle" id="refresh-workspace" title="刷新工作区" aria-label="刷新工作区"><svg><use href="#i-refresh"/></svg></button>
+        <button class="icon-button subtle" id="refresh-workspace" title="刷新工作区" aria-label="刷新 Research Workspace"><svg><use href="#i-refresh"/></svg></button>
       </div>
 
       <section class="workspace-card" id="workspace-card">
         <div class="workspace-heading">
           <span class="workspace-icon"><svg><use href="#i-folder"/></svg></span>
-          <div><strong>研究工作区</strong><small id="workspace-name">尚未选择</small></div>
+          <div><strong>Research Workspace</strong><small id="workspace-name">尚未选择</small></div>
           <button class="mini-button" id="open-workspace">打开</button>
         </div>
         <div class="workspace-path" id="workspace-path">选择目录后，Agent 会在此读取资料并保存产出。</div>
@@ -272,12 +272,12 @@
         <div>
           <div class="dialog-kicker">Research Project boundary</div>
           <h2>新建 Research Project</h2>
-          <p>每个 Project 绑定一个 Research Workspace；会话、资料与产出都留在这个边界内。</p>
+          <p>每个 Research Project 绑定一个 Research Workspace；Conversation、资料与产出都留在这个边界内。</p>
         </div>
         <button class="icon-button subtle" type="button" id="close-project" aria-label="关闭项目对话框"><svg><use href="#i-x"/></svg></button>
       </div>
       <div class="dialog-body">
-        <label class="field-label" for="project-name">项目名称</label>
+        <label class="field-label" for="project-name">Research Project 名称</label>
         <input id="project-name" type="text" maxlength="120" placeholder="例如：CRISPR 脱靶效应综述" required>
 
         <div class="field-label project-mode-label">Research Workspace</div>
@@ -298,11 +298,11 @@
             <input id="project-workspace-path" type="text" readonly placeholder="选择一个已有研究目录">
             <button type="button" class="secondary-button" id="choose-project-workspace">选择目录</button>
           </div>
-          <div class="field-help">目录会被原地绑定，其中的文件不会复制或删除。</div>
+          <div class="field-help">目录会被原地绑定；其中的文件不会复制，导入目录也永远不会被 SCIENTIA 删除。</div>
         </div>
       </div>
       <div class="dialog-footer">
-        <span class="dialog-footnote">Project 创建后，文件操作只会解析到它绑定的 Workspace。</span>
+        <span class="dialog-footnote">Research Project 创建后，文件操作只会解析到它绑定的 Research Workspace。</span>
         <div class="dialog-footer-actions">
           <button type="button" class="secondary-button" id="cancel-project">取消</button>
           <button type="submit" class="primary-button" id="create-project">创建项目</button>
@@ -350,12 +350,9 @@
         <input id="base-url" type="url" placeholder="https://api.deepseek.com/v1" spellcheck="false">
         <div class="field-help">使用 OpenAI 兼容代理时填写；留空则使用 DeepSeek 官方路由。</div>
 
-        <label class="field-label" for="settings-workspace-path">当前 Project 研究目录</label>
-        <div class="workspace-picker">
-          <input id="settings-workspace-path" type="text" readonly>
-          <button type="button" class="secondary-button" id="choose-workspace">选择目录</button>
-        </div>
-        <div class="field-help">Harness 只会在此目录读取资料并将产出写入 <code>.science/outputs/</code>。已有会话的 Project 不能更换目录。</div>
+        <label class="field-label" for="settings-workspace-path">当前 Research Workspace</label>
+        <input id="settings-workspace-path" type="text" readonly>
+        <div class="field-help">Research Workspace 在 Research Project 创建时确定，之后不可更换。Harness 只会在此目录读取资料并将产出写入 <code>.science/outputs/</code>。</div>
 
         <div class="security-note">
           <svg><use href="#i-shield"/></svg>

@@ -10,7 +10,7 @@ SCIENTIA 是一个参考 ClawsGO 桌面工作流、以 DeepSeek Harness 为执�
 - **证据优先**：每个会话有独立证据账本，回答区分“观察 / 推断 / 未知”，避免伪造文献、数据或实验结果。
 - **可追溯交付**：生成文件进入稳定输出目录，应用记录 SHA-256、运行状态、来源标记和质量警告。
 - **指令隔离**：工作区中的论文、网页和数据是待分析资料，不是用户指令。资料里的提示注入不会获得执行权。
-- **Research Project 边界**：Project 是导航的第一层，每个 Project 绑定唯一 Workspace；会话、资料、运行和产出不能跨 Project 混用。
+- **Research Project 边界**：Research Project 是导航的第一层，每个 Research Project 绑定唯一 Research Workspace；Conversation、资料、运行和产出不能跨 Research Project 混用。
 - **研究上下文**：会话、工作区文件、导入附件、研究轨迹和最近产出保持在同一工作台。
 - **Harness 会话**：每个研究对话对应一个稳定的 DSH session id，后续追问继续同一份持久化上下文。
 - **桌面生命周期**：关闭主窗口只隐藏到系统托盘，正在执行的研究继续运行；只有显式退出才停止 runtime。
@@ -75,7 +75,7 @@ Electron shell
 
 项目、会话索引、消息和当前选择保存在 Electron `userData` 下的 `scientia-product.sqlite3` 中。数据库只由主进程访问，渲染进程通过 preload 暴露的窄接口读写；首次升级会把旧版 `localStorage` 会话一次性迁移到本地数据库。
 
-Research Project 可以使用 SCIENTIA 管理的工作区，也可以导入已有目录。导入目录始终原地使用，SCIENTIA 删除项目时不会删除该外部目录；托管工作区仅能在应用管理根目录内删除。Archive 会保留项目与全部会话，可通过项目导航恢复；Delete 必须输入完整项目名称确认。
+Research Project 可以使用 SCIENTIA 管理的 Research Workspace，也可以导入已有目录。导入目录始终原地使用，SCIENTIA 删除 Research Project 时不会删除该外部目录；托管 Research Workspace 仅能在应用管理根目录内删除。Project Archival 会保留 Research Project 与全部 Conversation，可通过 Research Project 导航恢复；Delete 必须输入完整 Research Project 名称确认。
 
 `bridge.py` 每次只接收一个前台研究任务；相同研究对话复用相同 session id。这与“仅一个 Science Agent”的产品约束一致。
 
@@ -84,7 +84,7 @@ Research Project 可以使用 SCIENTIA 管理的工作区，也可以导入已�
 - `sdk-minimal` 的本地 shell 没有目录沙箱。Agent 具备当前用户进程可见的文件与命令权限，请只在你信任的研究目录中运行。
 - 应用不会把工作区资料当作指令执行；但资料内容仍会进入模型上下文，因此仍需警惕恶意文档。
 - 附件会被复制到 `<workspace>/.science/inputs/`。原始数据不会被覆盖。
-- 文件检查、打开和导入只作用于当前 Research Project 绑定的 Workspace，不接受 renderer 临时指定的根目录。
+- 文件检查、打开和导入只作用于当前 Research Project 绑定的 Research Workspace，不接受 renderer 临时指定的根目录。
 - 当前版本是本地开发运行版；正式分发前应补齐 Python runtime 打包、签名和自动更新。
 
 ## 参考

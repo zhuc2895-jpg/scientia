@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 import { openProductRepository } from '../product-repository.js';
@@ -171,22 +172,8 @@ test('conversations stay bound to their project workspace', (t) => {
   repository.createConversation(conversation());
 
   assert.equal(project.workspacePath, 'C:/Research/Project-A');
-  assert.throws(() => repository.rebindWorkspace('C:/Research/Project-B'), /已有会话/);
+  assert.equal(repository.rebindWorkspace, undefined);
   assert.equal(repository.loadState().project.workspacePath, 'C:/Research/Project-A');
-});
-
-test('an empty project can be rebound to a different workspace', (t) => {
-  const { directory, databasePath } = temporaryDatabase();
-  const repository = openTestRepository(databasePath);
-  t.after(() => {
-    repository.close();
-    rmSync(directory, { recursive: true, force: true });
-  });
-
-  repository.ensureProject({ workspacePath: 'C:/Research/Project-A' });
-  repository.rebindWorkspace('C:/Research/Project-B');
-
-  assert.equal(repository.loadState().project.workspacePath, 'C:/Research/Project-B');
 });
 
 test('conversations require a workspace-bound project', (t) => {
@@ -284,7 +271,39 @@ test('projects cannot share one research workspace', (t) => {
     name: 'Duplicate workspace',
     workspacePath: 'c:/research/test project',
     workspaceKind: 'imported',
-  }), /已经绑定/);
+  }), /目录重叠/);
+});
+
+test('nested workspaces cannot be bound to different projects', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  assert.throws(() => repository.createProject({
+    id: 'project-child',
+    name: 'Nested workspace',
+    workspacePath: 'C:/Research/Test Project/child',
+    workspaceKind: 'imported',
+  }), /目录重叠/);
+});
+
+test('a parent workspace cannot later contain an existing project workspace', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  assert.throws(() => repository.createProject({
+    id: 'project-parent',
+    name: 'Parent workspace',
+    workspacePath: 'C:/Research',
+    workspaceKind: 'imported',
+  }), /目录重叠/);
 });
 
 test('archive is reversible and leaves project conversations intact', (t) => {
@@ -308,6 +327,65 @@ test('archive is reversible and leaves project conversations intact', (t) => {
   assert.equal(restored.archivedAt, null);
   assert.equal(repository.loadState().activeProjectId, archivedProject.id);
   assert.deepEqual(repository.loadState().conversations, [archivedConversation]);
+});
+
+test('restoring an archived project does not steal focus from the active project', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const firstProject = repository.loadState().project;
+  const archivedProject = repository.createProject({
+    id: 'project-2',
+    name: 'Archived without focus',
+    workspacePath: 'C:/Research/Archived-Project',
+    workspaceKind: 'imported',
+  });
+  repository.archiveProject(archivedProject.id);
+  assert.equal(repository.loadState().activeProjectId, firstProject.id);
+
+  repository.restoreProject(archivedProject.id);
+  assert.equal(repository.loadState().activeProjectId, firstProject.id);
+  assert.equal(repository.loadState().projects.find((project) => project.id === archivedProject.id).archivedAt, null);
+});
+
+test('legacy active conversation is scoped to its project before another project can replace the global value', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const firstConversation = conversation();
+  const secondConversation = conversation({
+    id: 'conversation-2',
+    title: 'Second legacy thread',
+    createdAt: '2026-11-17T00:06:00.000Z',
+    updatedAt: '2026-11-17T00:06:00.000Z',
+  });
+  let repository = openTestRepository(databasePath);
+  const projectId = repository.loadState().activeProjectId;
+  repository.createConversation(firstConversation);
+  repository.createConversation(secondConversation);
+  repository.setActiveConversation(firstConversation.id);
+  repository.close();
+
+  const database = new DatabaseSync(databasePath);
+  database.prepare("DELETE FROM app_state WHERE key LIKE 'active_conversation_id:%'").run();
+  database.close();
+
+  repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  assert.equal(repository.loadState().activeId, firstConversation.id);
+  repository.createProject({
+    id: 'project-2',
+    name: 'Replacement project',
+    workspacePath: 'C:/Research/Replacement-Project',
+    workspaceKind: 'managed',
+  });
+  repository.setActiveProject(projectId);
+  assert.equal(repository.loadState().activeId, firstConversation.id);
 });
 
 test('project deletion requires the exact project name and removes only project-owned records', (t) => {

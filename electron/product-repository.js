@@ -120,7 +120,7 @@ export function openProductRepository({ databasePath }) {
     FROM projects
     ORDER BY (archived_at IS NOT NULL) ASC, updated_at DESC, id ASC
   `);
-  const selectFirstOpenProject = database.prepare(`
+  const selectFirstUnarchivedProject = database.prepare(`
     SELECT id, name, workspace_path, workspace_kind, created_at, updated_at, archived_at
     FROM projects WHERE archived_at IS NULL
     ORDER BY updated_at DESC, id ASC LIMIT 1
@@ -162,6 +162,11 @@ export function openProductRepository({ databasePath }) {
     return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
   }
 
+  function isWithin(root, target) {
+    const relative = path.relative(workspaceKey(root), workspaceKey(target));
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+  }
+
   function getProjectRow(id) {
     if (typeof id !== 'string' || !id) return null;
     return selectProject.get(id) || null;
@@ -172,7 +177,7 @@ export function openProductRepository({ databasePath }) {
     const requested = getProjectRow(requestedId);
     if (requested && !requested.archived_at) return requested;
 
-    const fallback = selectFirstOpenProject.get() || null;
+    const fallback = selectFirstUnarchivedProject.get() || null;
     if (persist && (fallback?.id || null) !== requestedId) setAppState.run(ACTIVE_PROJECT_KEY, fallback?.id || null);
     return fallback;
   }
@@ -188,12 +193,15 @@ export function openProductRepository({ databasePath }) {
   }
 
   function activeConversationId(projectId) {
-    const projectValue = selectActiveState.get(activeConversationStateKey(projectId))?.value || null;
+    const projectKey = activeConversationStateKey(projectId);
+    const projectValue = selectActiveState.get(projectKey)?.value || null;
     if (projectValue) return projectValue;
     const legacyValue = selectActiveState.get(ACTIVE_CONVERSATION_KEY)?.value || null;
     if (!legacyValue) return null;
     const row = selectConversationById.get(legacyValue);
-    return row?.project_id === projectId ? legacyValue : null;
+    if (row?.project_id !== projectId) return null;
+    setAppState.run(projectKey, legacyValue);
+    return legacyValue;
   }
 
   function setActiveConversationId(projectId, id) {
@@ -202,29 +210,12 @@ export function openProductRepository({ databasePath }) {
   }
 
   function assertWorkspaceAvailable(workspacePath, { exceptProjectId = null } = {}) {
-    const nextKey = workspaceKey(workspacePath);
     const conflict = selectProjects.all().find((row) => (
       row.id !== exceptProjectId
       && row.workspace_path
-      && workspaceKey(row.workspace_path) === nextKey
+      && (isWithin(row.workspace_path, workspacePath) || isWithin(workspacePath, row.workspace_path))
     ));
-    if (conflict) throw new Error(`该研究工作区已经绑定到 Research Project“${conflict.name}”。`);
-  }
-
-  function validateWorkspaceBinding(workspacePath) {
-    assertOpen();
-    if (typeof workspacePath !== 'string' || !workspacePath.trim()) throw new Error('Research Project 必须绑定研究工作区。');
-    const nextWorkspacePath = workspacePath.trim();
-    if (!path.isAbsolute(nextWorkspacePath)) throw new Error('研究工作区必须是绝对路径。');
-    const row = getActiveProjectRow() || getProjectRow(DEFAULT_PROJECT_ID);
-    if (!row) throw new Error('当前 Research Project 不存在。');
-
-    if (row.workspace_path && workspaceKey(row.workspace_path) !== workspaceKey(nextWorkspacePath)) {
-      const { count } = countProjectConversations.get(row.id);
-      if (count > 0) throw new Error('当前 Research Project 已有会话，不能直接更换研究工作区。');
-    }
-    assertWorkspaceAvailable(nextWorkspacePath, { exceptProjectId: row.id });
-    return serializeProject(row);
+    if (conflict) throw new Error(`该 Research Workspace 与现有 Research Project“${conflict.name}”的目录重叠。`);
   }
 
   function ensureProject({ workspacePath, name, workspaceKind = 'imported' } = {}) {
@@ -309,7 +300,7 @@ export function openProductRepository({ databasePath }) {
     try {
       archiveProject.run(timestamp, timestamp, id);
       if (selectActiveState.get(ACTIVE_PROJECT_KEY)?.value === id) {
-        const next = selectFirstOpenProject.get();
+        const next = selectFirstUnarchivedProject.get();
         setAppState.run(ACTIVE_PROJECT_KEY, next?.id || null);
       }
       database.exec('COMMIT');
@@ -328,7 +319,7 @@ export function openProductRepository({ databasePath }) {
     database.exec('BEGIN IMMEDIATE');
     try {
       restoreProject.run(timestamp, id);
-      setAppState.run(ACTIVE_PROJECT_KEY, id);
+      if (!getActiveProjectRow({ persist: false })) setAppState.run(ACTIVE_PROJECT_KEY, id);
       database.exec('COMMIT');
     } catch (error) {
       database.exec('ROLLBACK');
@@ -348,7 +339,7 @@ export function openProductRepository({ databasePath }) {
       deleteProjectConversations.run(id);
       deleteProject.run(id);
       if (selectActiveState.get(ACTIVE_PROJECT_KEY)?.value === id) {
-        const next = selectFirstOpenProject.get();
+        const next = selectFirstUnarchivedProject.get();
         setAppState.run(ACTIVE_PROJECT_KEY, next?.id || null);
       }
       database.exec('COMMIT');
@@ -480,15 +471,6 @@ export function openProductRepository({ databasePath }) {
     return id;
   }
 
-  function rebindActiveWorkspace(workspacePath) {
-    assertOpen();
-    const row = assertActiveProject();
-    validateWorkspaceBinding(workspacePath);
-    const timestamp = new Date().toISOString();
-    updateProjectWorkspace.run(workspacePath.trim(), 'imported', timestamp, row.id);
-    return serializeProject(getProjectRow(row.id));
-  }
-
   function close() {
     if (closed) return;
     closed = true;
@@ -500,8 +482,6 @@ export function openProductRepository({ databasePath }) {
     getProject,
     getConversationProjectId,
     ensureProject,
-    validateWorkspaceBinding,
-    rebindWorkspace: rebindActiveWorkspace,
     createProject,
     setActiveProject,
     archiveProject: archiveProjectRecord,

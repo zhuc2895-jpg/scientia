@@ -134,9 +134,13 @@ _Avoid_: Quality score, test, summary
 包含未核验内容、仅供审阅且不得作为正式投稿包的 Paper Package 变体。
 _Avoid_: Paper Package, final draft
 
+**Project Archival**:
+Research Project 的可逆生命周期状态：从活动导航中隐藏，但不删除 Research Project、Conversation、Research Workspace 或研究记录。
+_Avoid_: Project Archive, backup, deletion
+
 **Project Archive**:
 用于备份、迁移和灾难恢复的 Project 可携带包，包含 SQLite 快照、Research Workspace、来源快照、Paper Package 与审计清单。
-_Avoid_: Zip, export, backup file
+_Avoid_: Zip, export, backup file, Project Archival
 
 ### Trust boundaries
 

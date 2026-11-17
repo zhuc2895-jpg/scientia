@@ -25,7 +25,6 @@ contextBridge.exposeInMainWorld('scienceAgent', {
   conversationDelete: (id) => ipcRenderer.invoke('conversation:delete', id),
   conversationSetActive: (id) => ipcRenderer.invoke('conversation:set-active', id),
   flushProductState: (payload) => ipcRenderer.sendSync('product:flush', payload),
-  pickWorkspace: () => ipcRenderer.invoke('workspace:pick'),
   inspectWorkspace: () => ipcRenderer.invoke('workspace:inspect'),
   openWorkspace: () => ipcRenderer.invoke('workspace:open'),
   openPath: (relativePath) => ipcRenderer.invoke('path:open', { relativePath }),

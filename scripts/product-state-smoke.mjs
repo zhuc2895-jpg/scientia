@@ -210,11 +210,27 @@ try {
 
   cdp = await connect(await launchApp());
   await waitForRenderer(cdp);
-  const isolatedWorkspace = path.join(userData, 'research-workspace');
-  await evaluate(cdp, `(async () => {
-    const config = await window.scienceAgent.configLoad();
-    return window.scienceAgent.configSave({ ...config, workspace: ${JSON.stringify(isolatedWorkspace)} });
+  await evaluate(cdp, `(() => {
+    document.querySelector('#add-project').click();
+    document.querySelector('#project-name').value = 'Smoke Project';
+    document.querySelector('#create-project').click();
+    return true;
   })()`);
+  let smokeProjectState = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    smokeProjectState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+    if (smokeProjectState.project?.name === 'Smoke Project') break;
+    await delay(100);
+  }
+  assert.equal(smokeProjectState.project.name, 'Smoke Project');
+  const workspace = smokeProjectState.project.workspacePath;
+  const immutableBinding = await evaluate(cdp, `(async () => {
+    const config = await window.scienceAgent.configLoad();
+    return window.scienceAgent.configSave({ ...config, workspace: 'C:\\\\Research\\\\Other Project' })
+      .then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message }));
+  })()`);
+  assert.equal(immutableBinding.ok, false);
+  assert.match(immutableBinding.message, /不可更换/);
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);
   const created = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
@@ -229,9 +245,8 @@ try {
   })()`);
   assert.equal(workspaceGuard.project.workspacePath, workspaceGuard.initialWorkspace);
   assert.equal(workspaceGuard.rebound.ok, false);
-  assert.match(workspaceGuard.rebound.message, /已有会话/);
-  console.log('OK   Conversation ownership blocks silent workspace rebinding');
-  const workspace = workspaceGuard.initialWorkspace;
+  assert.match(workspaceGuard.rebound.message, /不可更换/);
+  console.log('OK   Research Workspace binding is immutable');
   const inspectedWorkspace = await evaluate(cdp, `window.scienceAgent.inspectWorkspace('C:\\\\Windows')`);
   assert.equal(inspectedWorkspace.workspace, workspace);
   console.log('OK   Filesystem access ignores renderer-supplied workspace roots');
@@ -246,6 +261,8 @@ try {
   console.log('OK   File imports require main-process authorization tokens');
 
   const initialProjectId = created.activeProjectId;
+  const existingProjectIds = created.projects.map((project) => project.id);
+  const existingProjectCount = created.projects.length;
   await evaluate(cdp, `document.querySelector('#add-project').click()`);
   assert.equal(await evaluate(cdp, `document.querySelector('#project-dialog').open`), true);
   assert.equal(await evaluate(cdp, `Boolean(document.querySelector('#project-list').compareDocumentPosition(document.querySelector('#conversation-list')) & Node.DOCUMENT_POSITION_FOLLOWING)`), true);
@@ -257,10 +274,10 @@ try {
   let managedState = null;
   for (let attempt = 0; attempt < 50; attempt += 1) {
     managedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
-    if (managedState.activeProjectId !== initialProjectId && managedState.projects.length === 2) break;
+    if (managedState.activeProjectId !== initialProjectId && managedState.projects.length === existingProjectCount + 1) break;
     await delay(100);
   }
-  const managedProject = managedState.projects.find((project) => project.id !== initialProjectId);
+  const managedProject = managedState.projects.find((project) => !existingProjectIds.includes(project.id));
   assert.ok(managedProject, 'managed project was not created');
   assert.equal(managedState.activeProjectId, managedProject.id);
   assert.equal(managedProject.workspaceKind, 'managed');
@@ -325,6 +342,15 @@ try {
   await evaluate(cdp, `document.querySelector('[data-restore-project="${managedProject.id}"]').click()`);
   for (let attempt = 0; attempt < 50; attempt += 1) {
     switchedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+    if (switchedState.projects.find((project) => project.id === managedProject.id)?.archivedAt === null) break;
+    await delay(100);
+  }
+  assert.equal(switchedState.activeProjectId, initialProjectId);
+  assert.equal(switchedState.projects.find((project) => project.id === managedProject.id).archivedAt, null);
+
+  await evaluate(cdp, `document.querySelector('[data-project-id="${managedProject.id}"]').click()`);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    switchedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
     if (switchedState.activeProjectId === managedProject.id) break;
     await delay(100);
   }
@@ -343,6 +369,9 @@ try {
   }
   assert.equal(deletedState.projects.some((project) => project.id === managedProject.id), false);
   assert.equal(deletedState.activeProjectId, initialProjectId);
+  for (let attempt = 0; attempt < 50 && existsSync(managedProject.workspacePath); attempt += 1) {
+    await delay(100);
+  }
   assert.equal(existsSync(managedProject.workspacePath), false);
   console.log('OK   Project deletion requires the exact name and removes its managed workspace');
 

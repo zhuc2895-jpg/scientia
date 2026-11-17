@@ -11,7 +11,7 @@ function isWithin(root, target) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
-export async function removeManagedProjectWorkspace({ managedRoot, project }) {
+export async function removeManagedProjectWorkspace({ managedRoot, project, protectedPaths = [] }) {
   if (project?.workspaceKind !== 'managed') return false;
   if (typeof managedRoot !== 'string' || !path.isAbsolute(managedRoot)) {
     throw new Error('受管理研究工作区根目录无效。');
@@ -25,6 +25,11 @@ export async function removeManagedProjectWorkspace({ managedRoot, project }) {
   if (target === root || !isWithin(root, target)) {
     throw new Error('拒绝删除受管理目录之外的研究工作区。');
   }
+  for (const protectedPath of protectedPaths) {
+    if (typeof protectedPath === 'string' && path.isAbsolute(protectedPath) && isWithin(target, protectedPath)) {
+      throw new Error('受管理目录内仍包含其他 Research Workspace，拒绝递归删除。');
+    }
+  }
 
   let realRoot;
   let realTarget;
@@ -36,6 +41,17 @@ export async function removeManagedProjectWorkspace({ managedRoot, project }) {
   }
   if (realTarget === realRoot || !isWithin(realRoot, realTarget)) {
     throw new Error('拒绝删除受管理目录之外的研究工作区。');
+  }
+  for (const protectedPath of protectedPaths) {
+    if (typeof protectedPath !== 'string' || !path.isAbsolute(protectedPath)) continue;
+    try {
+      const realProtected = await fs.realpath(protectedPath);
+      if (isWithin(realTarget, realProtected)) {
+        throw new Error('受管理目录内仍包含其他 Research Workspace，拒绝递归删除。');
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
   }
   await fs.rm(realTarget, { recursive: true, force: true });
   return true;
