@@ -14,7 +14,7 @@ function temporaryDatabase() {
 
 function openTestRepository(databasePath) {
   const repository = openProductRepository({ databasePath });
-  repository.ensureProject({ workspacePath: 'C:/Research/Test Project' });
+  repository.initializeDefaultProject({ workspacePath: 'C:/Research/Test Project' });
   return repository;
 }
 
@@ -168,7 +168,12 @@ test('conversations stay bound to their project workspace', (t) => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  const project = repository.ensureProject({ workspacePath: 'C:/Research/Project-A' });
+  const project = repository.createProject({
+    id: 'project-a',
+    name: 'Project A',
+    workspacePath: 'C:/Research/Project-A',
+    workspaceKind: 'imported',
+  });
   repository.createConversation(conversation());
 
   assert.equal(project.workspacePath, 'C:/Research/Project-A');
@@ -320,7 +325,7 @@ test('archive is reversible and leaves project conversations intact', (t) => {
   const archivedProject = repository.archiveProject(projectId);
   assert.equal(archivedProject.id, projectId);
   assert.ok(archivedProject.archivedAt);
-  assert.equal(repository.loadState().archivedProjects.some((project) => project.id === archivedProject.id), true);
+  assert.equal(repository.loadState().projects.filter((project) => project.archivedAt).some((project) => project.id === archivedProject.id), true);
   assert.throws(() => repository.setActiveProject(archivedProject.id), /已归档/);
 
   const restored = repository.restoreProject(archivedProject.id);
@@ -386,6 +391,26 @@ test('legacy active conversation is scoped to its project before another project
   });
   repository.setActiveProject(projectId);
   assert.equal(repository.loadState().activeId, firstConversation.id);
+});
+
+test('deleting the bootstrapped default project is durable across repository restarts', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openProductRepository({ databasePath });
+  repository.initializeDefaultProject({ workspacePath: 'C:/Research/Default-Project' });
+  const defaultProject = repository.loadState().project;
+  repository.deleteProject({
+    id: defaultProject.id,
+    confirmationName: defaultProject.name,
+  });
+  repository.close();
+
+  repository = openProductRepository({ databasePath });
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  assert.deepEqual(repository.loadState().projects, []);
+  assert.equal(repository.loadState().activeProjectId, null);
 });
 
 test('project deletion requires the exact project name and removes only project-owned records', (t) => {

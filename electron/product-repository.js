@@ -3,10 +3,12 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { normalizeConversation } from '../app/conversation-state.js';
+import { isWithin } from './path-boundary.js';
 
 const ACTIVE_PROJECT_KEY = 'active_project_id';
 const ACTIVE_CONVERSATION_KEY = 'active_conversation_id';
 const CONVERSATION_MIGRATION_KEY = 'conversation_local_storage_v1';
+const DEFAULT_PROJECT_BOOTSTRAP_KEY = 'default_project_bootstrap_v1';
 const DEFAULT_PROJECT_ID = 'scientia-default-project';
 const WORKSPACE_KINDS = new Set(['managed', 'imported']);
 
@@ -82,10 +84,17 @@ export function openProductRepository({ databasePath }) {
   if (!projectColumns.some((column) => column.name === 'archived_at')) {
     database.exec('ALTER TABLE projects ADD COLUMN archived_at TEXT');
   }
-  database.prepare(`
-    INSERT OR IGNORE INTO projects (id, name, workspace_path, workspace_kind, created_at, updated_at, archived_at)
-    VALUES (?, ?, NULL, 'imported', ?, ?, NULL)
-  `).run(DEFAULT_PROJECT_ID, 'Research Project', now, now);
+  const bootstrapState = database.prepare('SELECT value FROM app_state WHERE key = ?').get(DEFAULT_PROJECT_BOOTSTRAP_KEY);
+  if (!bootstrapState) {
+    const projectCount = database.prepare('SELECT COUNT(*) AS count FROM projects').get().count;
+    if (projectCount === 0) {
+      database.prepare(`
+        INSERT INTO projects (id, name, workspace_path, workspace_kind, created_at, updated_at, archived_at)
+        VALUES (?, ?, NULL, 'imported', ?, ?, NULL)
+      `).run(DEFAULT_PROJECT_ID, 'Research Project', now, now);
+    }
+    database.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(DEFAULT_PROJECT_BOOTSTRAP_KEY, '1');
+  }
 
   const insertConversation = database.prepare(`
     INSERT INTO conversations (id, project_id, title, created_at, updated_at, payload_json)
@@ -106,7 +115,6 @@ export function openProductRepository({ databasePath }) {
     SELECT id, payload_json FROM conversations WHERE project_id = ? ORDER BY updated_at DESC, id ASC
   `);
   const selectConversationById = database.prepare('SELECT payload_json, project_id FROM conversations WHERE id = ?');
-  const countProjectConversations = database.prepare('SELECT COUNT(*) AS count FROM conversations WHERE project_id = ?');
   const insertProject = database.prepare(`
     INSERT INTO projects (id, name, workspace_path, workspace_kind, created_at, updated_at, archived_at)
     VALUES (?, ?, ?, ?, ?, ?, NULL)
@@ -128,7 +136,6 @@ export function openProductRepository({ databasePath }) {
   const updateProjectWorkspace = database.prepare(`
     UPDATE projects SET workspace_path = ?, workspace_kind = ?, updated_at = ? WHERE id = ?
   `);
-  const updateProjectName = database.prepare('UPDATE projects SET name = ?, updated_at = ? WHERE id = ?');
   const archiveProject = database.prepare('UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ?');
   const restoreProject = database.prepare('UPDATE projects SET archived_at = NULL, updated_at = ? WHERE id = ?');
   const deleteProject = database.prepare('DELETE FROM projects WHERE id = ?');
@@ -155,16 +162,6 @@ export function openProductRepository({ databasePath }) {
       updatedAt: row.updated_at,
       archivedAt: row.archived_at || null,
     };
-  }
-
-  function workspaceKey(value) {
-    const resolved = path.resolve(value);
-    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-  }
-
-  function isWithin(root, target) {
-    const relative = path.relative(workspaceKey(root), workspaceKey(target));
-    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
   }
 
   function getProjectRow(id) {
@@ -218,19 +215,15 @@ export function openProductRepository({ databasePath }) {
     if (conflict) throw new Error(`该 Research Workspace 与现有 Research Project“${conflict.name}”的目录重叠。`);
   }
 
-  function ensureProject({ workspacePath, name, workspaceKind = 'imported' } = {}) {
+  function initializeDefaultProject({ workspacePath }) {
     assertOpen();
-    if (typeof workspacePath !== 'string' || !path.isAbsolute(workspacePath)) throw new Error('研究工作区必须是绝对路径。');
-    normalizeWorkspaceKind(workspaceKind);
+    if (typeof workspacePath !== 'string' || !path.isAbsolute(workspacePath)) throw new Error('Research Workspace 必须是绝对路径。');
     const row = getProjectRow(DEFAULT_PROJECT_ID);
     if (!row) throw new Error('默认 Research Project 不存在。');
-    const existingConversations = countProjectConversations.get(DEFAULT_PROJECT_ID).count;
-    if (row.workspace_path && existingConversations > 0 && workspaceKey(row.workspace_path) !== workspaceKey(workspacePath)) {
-      throw new Error('当前 Research Project 已有会话，不能直接更换研究工作区。');
+    if (!row.workspace_path) {
+      assertWorkspaceAvailable(workspacePath, { exceptProjectId: DEFAULT_PROJECT_ID });
+      updateProjectWorkspace.run(workspacePath.trim(), 'imported', new Date().toISOString(), DEFAULT_PROJECT_ID);
     }
-    assertWorkspaceAvailable(workspacePath, { exceptProjectId: DEFAULT_PROJECT_ID });
-    updateProjectWorkspace.run(workspacePath.trim(), workspaceKind, new Date().toISOString(), DEFAULT_PROJECT_ID);
-    if (typeof name === 'string' && name.trim()) updateProjectName.run(normalizeProjectName(name), new Date().toISOString(), DEFAULT_PROJECT_ID);
     setAppState.run(ACTIVE_PROJECT_KEY, DEFAULT_PROJECT_ID);
     return serializeProject(getProjectRow(DEFAULT_PROJECT_ID));
   }
@@ -249,7 +242,6 @@ export function openProductRepository({ databasePath }) {
     const migrationComplete = selectActiveState.get(CONVERSATION_MIGRATION_KEY)?.value === '1';
     return {
       projects,
-      archivedProjects: projects.filter((project) => project.archivedAt),
       activeProjectId,
       project: activeRow ? serializeProject(activeRow) : null,
       conversations,
@@ -481,7 +473,7 @@ export function openProductRepository({ databasePath }) {
     loadState,
     getProject,
     getConversationProjectId,
-    ensureProject,
+    initializeDefaultProject,
     createProject,
     setActiveProject,
     archiveProject: archiveProjectRecord,

@@ -16,6 +16,7 @@ import { captureSecretFromUser } from './native-secret-input.js';
 import { createImportAuthorizer } from './import-authorizer.js';
 import { resolveWorkspaceEntry } from './workspace-paths.js';
 import { removeManagedProjectWorkspace } from './project-workspace.js';
+import { pathKey } from './path-boundary.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -143,7 +144,7 @@ function managedWorkspacesRoot() {
 function assertNoActiveResearchRun() {
   const daemon = runtimeManager?.getState();
   if (daemon?.activeRunId || daemon?.state === 'running') {
-    throw new Error('当前 Research Project 有研究运行，请先停止任务。');
+    throw new Error('当前 Research Project 有 Research Run，请先停止。');
   }
 }
 
@@ -428,10 +429,10 @@ async function runAgent(payload, sender) {
   if (!runtimeManager) throw new Error('Science Agent runtime is not ready.');
   const state = productRepository.loadState();
   const conversationProjectId = productRepository.getConversationProjectId(payload?.conversationId);
-  if (!state.activeProjectId || conversationProjectId !== state.activeProjectId) {
-    throw new Error('只能运行当前 Research Project 中的研究会话。');
+  if (!state.activeProjectId || conversationProjectId !== state.activeProjectId || !state.project?.workspacePath) {
+    throw new Error('只能运行当前 Research Project 中的 Conversation。');
   }
-  return runtimeManager.run(payload, sender);
+  return runtimeManager.run(payload, sender, state.project.workspacePath);
 }
 
 async function cancelAgent(runId) {
@@ -573,7 +574,7 @@ function installIpc() {
     if (!state.project?.workspacePath) throw new Error('Research Project 尚未绑定 Research Workspace。');
     const requestedWorkspace = normalizeWorkspace(payload.workspace);
     const workspace = normalizeWorkspace(state.project.workspacePath);
-    if (path.resolve(requestedWorkspace).toLowerCase() !== path.resolve(workspace).toLowerCase()) {
+    if (pathKey(requestedWorkspace) !== pathKey(workspace)) {
       throw new Error('Research Project 的 Research Workspace 绑定在创建后不可更换。');
     }
     await ensureWorkspace(workspace);
@@ -621,7 +622,7 @@ function installIpc() {
   ipcMain.handle('research:recover-run', async (_event, payload) => {
     const workspace = normalizeWorkspace(payload?.workspace);
     const projectWorkspace = productRepository.loadState().project?.workspacePath;
-    if (!projectWorkspace || path.resolve(workspace).toLowerCase() !== path.resolve(projectWorkspace).toLowerCase()) {
+    if (!projectWorkspace || pathKey(workspace) !== pathKey(projectWorkspace)) {
       throw new Error('只能从当前 Research Project 的工作区恢复运行。');
     }
     return readRunManifest({
@@ -676,9 +677,11 @@ if (!singleInstance) {
     sessionApiKey = await hydrateSecret(config);
     productRepository = openProductRepository({ databasePath: productDatabasePath() });
     const configuredWorkspace = config.workspace || defaultWorkspace();
-    const project = productRepository.loadState().project;
-    const workspace = await ensureWorkspace(project?.workspacePath || configuredWorkspace);
-    if (!project?.workspacePath) productRepository.ensureProject({ workspacePath: workspace });
+    const productState = productRepository.loadState();
+    const unboundDefaultProject = productState.projects.length === 1 && !productState.projects[0].workspacePath;
+    const requestedWorkspace = productState.project?.workspacePath || (unboundDefaultProject ? configuredWorkspace : '');
+    const workspace = requestedWorkspace ? await ensureWorkspace(requestedWorkspace) : '';
+    if (unboundDefaultProject) productRepository.initializeDefaultProject({ workspacePath: workspace });
     if (config.workspace !== workspace) {
       config.workspace = workspace;
       await writeConfigFile(config);

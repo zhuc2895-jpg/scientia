@@ -184,13 +184,13 @@ function flushProductState(event) {
     });
     if (result?.ok === false) {
       event.preventDefault();
-      event.returnValue = result.error || '无法保存当前会话。';
+      event.returnValue = result.error || '无法保存当前 Conversation。';
     } else {
       dirtyConversations.clear();
     }
   } catch (error) {
     event.preventDefault();
-    event.returnValue = error.message || '无法保存当前会话。';
+    event.returnValue = error.message || '无法保存当前 Conversation。';
   }
 }
 
@@ -214,7 +214,7 @@ function applyProductState(productState) {
 }
 
 function persistActiveId() {
-  void bridge.conversationSetActive(state.activeId).catch((error) => showToast(error.message || '无法保存当前会话。'));
+  void bridge.conversationSetActive(state.activeId).catch((error) => showToast(error.message || '无法保存当前 Conversation。'));
 }
 
 function formatTime(value) {
@@ -525,10 +525,10 @@ function emptyAssistantMarkup(message) {
     return `<div class="message-status"><span class="thinking-dots"><span></span><span></span><span></span></span><span>${escapeHTML(message.statusText || 'Science Agent 正在研究')}</span></div>`;
   }
   if (message.status === 'error') {
-    return `<div class="message-error">${escapeHTML(message.error || message.content || '研究任务未完成。')}</div>`;
+    return `<div class="message-error">${escapeHTML(message.error || message.content || 'Research Run未完成。')}</div>`;
   }
   if (message.status === 'cancelled') {
-    return `<div class="message-cancelled">${escapeHTML(message.content || '研究任务已停止。')}</div>`;
+    return `<div class="message-cancelled">${escapeHTML(message.content || 'Research Run已停止。')}</div>`;
   }
   if (message.status === 'needs-review') {
     const conversation = activeConversation();
@@ -631,7 +631,7 @@ function renderWorkspace() {
     els.researchStatus.innerHTML = `<span>${escapeHTML(statusText)}</span><small>${escapeHTML(latestRun.mode || 'auto')} · ${escapeHTML(formatRelative(latestRun.finishedAt || latestRun.startedAt))}</small>`;
   } else {
     els.researchStatus.className = 'research-status';
-    els.researchStatus.textContent = '首次研究任务完成后，这里会显示证据与交付物核验结果。';
+    els.researchStatus.textContent = '首次Research Run完成后，这里会显示证据与交付物核验结果。';
   }
 
   const files = workspace?.recent || [];
@@ -673,7 +673,7 @@ function applyRuntimeState() {
   const error = !configured || ['failed', 'exited'].includes(daemonState);
 
   els.agentStatusDot.className = `status-dot ${busy ? 'busy' : ready ? 'online' : error ? 'error' : ''}`;
-  els.agentCardStatus.textContent = busy ? '任务进行中' : starting ? '启动本地服务' : ready ? 'Harness 已连接' : error ? '需要处理' : '需要配置';
+  els.agentCardStatus.textContent = busy ? 'Research Run 进行中' : starting ? '启动本地服务' : ready ? 'Harness 已连接' : error ? '需要处理' : '需要配置';
   els.modelChip.classList.toggle('online', ready && !busy);
   els.modelChip.classList.toggle('busy', busy || starting);
   els.modelChipLabel.textContent = state.config?.model || 'Harness';
@@ -752,7 +752,7 @@ async function chooseProjectImport() {
 
 async function prepareProjectMutation() {
   if (state.activeRun) {
-    showToast('请先停止当前研究任务。');
+    showToast('请先停止当前Research Run。');
     return false;
   }
   await Promise.allSettled([...conversationWrites.values()]);
@@ -900,7 +900,7 @@ async function ensureConversation() {
 
 function selectConversation(id) {
   if (state.activeRun) {
-    showToast('请先停止当前研究任务，再切换到其他会话。');
+    showToast('请先停止当前Research Run，再切换到其他 Conversation。');
     return;
   }
   state.activeId = id;
@@ -913,7 +913,7 @@ async function deleteConversation(id) {
   const conversation = state.conversations.find((item) => item.id === id);
   if (!conversation) return;
   if (state.activeRun?.conversationId === id) {
-    showToast('当前会话正在运行，请先停止任务。');
+    showToast('当前 Conversation正在运行，请先停止任务。');
     return;
   }
   if (!window.confirm(`删除“${conversation.title}”？此操作只删除本地会话记录。`)) return;
@@ -992,7 +992,7 @@ function failRun(event) {
   const message = conversation?.messages.find((item) => item.id === run.assistantId);
   if (conversation && message) {
     message.status = 'error';
-    message.error = event.message || '研究任务未完成。';
+    message.error = event.message || 'Research Run未完成。';
     if (conversation.activeRun?.runId === run.runId) conversation.activeRun = null;
     conversation.updatedAt = nowISO();
     conversation.activities = conversation.activities.map((activity) => ({ ...activity, status: activity.status === 'active' ? 'done' : activity.status }));
@@ -1052,10 +1052,10 @@ function handleAgentEvent(event) {
   if (event.type === 'cancelled') {
     if (conversation && message) {
       message.status = 'cancelled';
-      message.content = event.message || '研究任务已停止。';
+      message.content = event.message || 'Research Run已停止。';
       if (conversation.activeRun?.runId === run.runId) conversation.activeRun = null;
       conversation.activities = conversation.activities.map((activity) => ({ ...activity, status: 'done' }));
-      conversation.activities.push({ id: uid(), label: '用户停止了研究任务', status: 'done', time: nowISO() });
+      conversation.activities.push({ id: uid(), label: '用户停止了Research Run', status: 'done', time: nowISO() });
     }
     clearInterval(state.elapsedTimer);
     state.activeRun = null;
@@ -1095,7 +1095,7 @@ async function sendResearchTask({ promptOverride = null, displayContent = null, 
     conversation = prepareConversationForNextRun(conversation, { continuedAt: createdAt, nextRunId: runId, continuation });
     state.conversations = state.conversations.map((item) => item.id === conversation.id ? conversation : item);
   } catch (error) {
-    showToast(error.message || '当前会话不能启动新的研究任务。');
+    showToast(error.message || '当前 Conversation不能启动新的Research Run。');
     return;
   }
 
@@ -1112,7 +1112,7 @@ async function sendResearchTask({ promptOverride = null, displayContent = null, 
   conversation.evidenceMode = state.evidenceMode;
   conversation.researchMode = researchMode;
   conversation.activities.push(
-    { id: uid(), label: '研究任务已提交', status: 'done', time: createdAt },
+    { id: uid(), label: 'Research Run已提交', status: 'done', time: createdAt },
     { id: uid(), label: '正在启动 DeepSeek Harness', status: 'active', time: createdAt },
   );
   conversation.activeRun = {
@@ -1149,7 +1149,7 @@ async function sendResearchTask({ promptOverride = null, displayContent = null, 
       mode: researchMode,
     });
   } catch (error) {
-    failRun({ message: error.message || '无法启动研究任务。' });
+    failRun({ message: error.message || '无法启动Research Run。' });
   }
 }
 
@@ -1177,12 +1177,12 @@ async function stopResearchTask() {
   const message = conversation?.messages.find((item) => item.id === run.assistantId);
   if (message) {
     message.status = 'cancelled';
-    message.content = '研究任务已由用户停止。';
+    message.content = 'Research Run已由用户停止。';
   }
   if (conversation) {
     if (conversation.activeRun?.runId === run.runId) conversation.activeRun = null;
     conversation.activities = conversation.activities.map((activity) => ({ ...activity, status: 'done' }));
-    conversation.activities.push({ id: uid(), label: '用户停止了研究任务', status: 'done', time: nowISO() });
+    conversation.activities.push({ id: uid(), label: '用户停止了Research Run', status: 'done', time: nowISO() });
   }
   clearInterval(state.elapsedTimer);
   state.activeRun = null;
@@ -1240,7 +1240,7 @@ function settingsStatusMarkup() {
   if (!config.apiKeyPresent) {
     return '<span class="status-dot"></span><span>Harness SDK 已就绪，等待 API Key。</span>';
   }
-  return '<span class="status-dot online"></span><span>DeepSeek Harness 已就绪，可运行单 Agent 研究任务。</span>';
+  return '<span class="status-dot online"></span><span>DeepSeek Harness 已就绪，可运行单 Agent Research Run。</span>';
 }
 
 function populateSettings() {
@@ -1324,7 +1324,7 @@ function bindEvents() {
   els.appTabs.addEventListener('click', (event) => {
     const add = event.target.closest('#app-tab-add');
     if (add) {
-      if (state.activeRun) showToast('请先停止当前研究任务。');
+      if (state.activeRun) showToast('请先停止当前Research Run。');
       else void createConversation();
       return;
     }
@@ -1344,7 +1344,7 @@ function bindEvents() {
   $('#context-files').addEventListener('click', () => void attachResearchFiles());
   $('#new-research').addEventListener('click', () => {
     if (state.activeRun) {
-      showToast('请先停止当前研究任务。');
+      showToast('请先停止当前Research Run。');
       return;
     }
     if (!activeProject()) {
@@ -1654,7 +1654,6 @@ function createPreviewBridge() {
   const previewProject = () => previewProjects.find((project) => project.id === previewActiveProjectId) || null;
   const previewProductState = () => ({
     projects: previewProjects.map((project) => structuredClone(project)),
-    archivedProjects: previewProjects.filter((project) => project.archivedAt).map((project) => structuredClone(project)),
     activeProjectId: previewActiveProjectId,
     project: previewProject() ? structuredClone(previewProject()) : null,
     conversations: (previewConversationsByProject.get(previewActiveProjectId) || []).map((conversation) => structuredClone(conversation)),

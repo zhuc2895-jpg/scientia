@@ -229,7 +229,7 @@ export function createDaemonManager({
     });
   }
 
-  async function run(payload, sender) {
+  async function run(payload, sender, workspaceOverride = null) {
     const runId = typeof payload?.runId === 'string' ? payload.runId : '';
     const conversationId = typeof payload?.conversationId === 'string' ? payload.conversationId : '';
     const prompt = typeof payload?.prompt === 'string' ? payload.prompt.trim() : '';
@@ -239,7 +239,9 @@ export function createDaemonManager({
     const started = await start();
     if (!started || !child) throw new Error(state.error || 'Science Agent daemon is unavailable.');
     const config = await readConfigFile();
-    const workspace = path.resolve(config.workspace);
+    const boundWorkspace = typeof workspaceOverride === 'string' ? workspaceOverride : config.workspace;
+    if (typeof boundWorkspace !== 'string' || !path.isAbsolute(boundWorkspace)) throw new Error('Research Workspace 绑定无效。');
+    const workspace = path.resolve(boundWorkspace);
     await fs.mkdir(workspace, { recursive: true });
 
     const request = {

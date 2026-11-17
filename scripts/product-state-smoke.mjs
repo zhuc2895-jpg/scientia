@@ -331,7 +331,7 @@ try {
   let archivedState = null;
   for (let attempt = 0; attempt < 50; attempt += 1) {
     archivedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
-    if (archivedState.archivedProjects.some((project) => project.id === managedProject.id)) break;
+    if (archivedState.projects.some((project) => project.id === managedProject.id && project.archivedAt)) break;
     await delay(100);
   }
   assert.equal(archivedState.projects.find((project) => project.id === managedProject.id).archivedAt !== null, true);

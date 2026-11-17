@@ -83,11 +83,11 @@
 
       <label class="side-search">
         <svg><use href="#i-search"/></svg>
-        <input id="conversation-search" type="search" placeholder="搜索项目会话" autocomplete="off">
+        <input id="conversation-search" type="search" placeholder="搜索 Conversation" autocomplete="off">
       </label>
 
       <div class="sidebar-section-label">Active Research Project Conversations</div>
-      <nav class="conversation-list" id="conversation-list" aria-label="当前项目的会话"></nav>
+      <nav class="conversation-list" id="conversation-list" aria-label="当前 Research Project 的 Conversation"></nav>
 
       <div class="agent-card">
         <div class="agent-avatar">
@@ -185,7 +185,7 @@
         </div>
         <div class="composer" id="composer">
           <div class="attachment-tray" id="attachment-tray"></div>
-          <textarea id="prompt-input" rows="1" placeholder="描述研究问题、数据或需要的交付物…" aria-label="研究任务"></textarea>
+          <textarea id="prompt-input" rows="1" placeholder="描述研究问题、数据或需要的交付物…" aria-label="Research Run"></textarea>
           <div class="composer-footer">
             <div class="composer-tools">
               <button class="tool-button" id="attach-files" type="button" title="导入研究资料"><svg><use href="#i-paperclip"/></svg><span>资料</span></button>
@@ -207,8 +207,8 @@
             </div>
             <div class="composer-actions">
               <span class="keyboard-hint">Enter 发送 · Shift+Enter 换行</span>
-              <button class="send-button" id="send-button" type="button" aria-label="发送研究任务"><svg><use href="#i-send"/></svg></button>
-              <button class="stop-button" id="stop-button" type="button" aria-label="停止研究任务" hidden><svg><use href="#i-stop"/></svg></button>
+              <button class="send-button" id="send-button" type="button" aria-label="发送 Research Run"><svg><use href="#i-send"/></svg></button>
+              <button class="stop-button" id="stop-button" type="button" aria-label="停止 Research Run" hidden><svg><use href="#i-stop"/></svg></button>
             </div>
           </div>
         </div>
@@ -239,7 +239,7 @@
           <div class="metric"><strong id="metric-outputs">0</strong><span>产出</span></div>
           <div class="metric"><strong id="metric-evidence">0</strong><span>证据</span></div>
         </div>
-        <div class="research-status" id="research-status">首次研究任务完成后，这里会显示证据与交付物核验结果。</div>
+        <div class="research-status" id="research-status">首次 Research Run 完成后，这里会显示证据与交付物核验结果。</div>
       </section>
 
       <section class="inspector-section">
@@ -248,7 +248,7 @@
       </section>
 
       <section class="inspector-section timeline-section">
-        <div class="section-heading"><h3>研究轨迹</h3><span>当前会话</span></div>
+        <div class="section-heading"><h3>研究轨迹</h3><span>当前 Conversation</span></div>
         <div class="timeline" id="timeline"></div>
       </section>
 
@@ -274,7 +274,7 @@
           <h2>新建 Research Project</h2>
           <p>每个 Research Project 绑定一个 Research Workspace；Conversation、资料与产出都留在这个边界内。</p>
         </div>
-        <button class="icon-button subtle" type="button" id="close-project" aria-label="关闭项目对话框"><svg><use href="#i-x"/></svg></button>
+        <button class="icon-button subtle" type="button" id="close-project" aria-label="关闭 Research Project 对话框"><svg><use href="#i-x"/></svg></button>
       </div>
       <div class="dialog-body">
         <label class="field-label" for="project-name">Research Project 名称</label>
@@ -305,7 +305,7 @@
         <span class="dialog-footnote">Research Project 创建后，文件操作只会解析到它绑定的 Research Workspace。</span>
         <div class="dialog-footer-actions">
           <button type="button" class="secondary-button" id="cancel-project">取消</button>
-          <button type="submit" class="primary-button" id="create-project">创建项目</button>
+          <button type="submit" class="primary-button" id="create-project">创建 Research Project</button>
         </div>
       </div>
     </form>
@@ -317,7 +317,7 @@
         <div>
           <div class="dialog-kicker">Science Agent runtime</div>
           <h2>设置</h2>
-          <p>连接 DeepSeek Harness。Research Workspace 由当前 Project 绑定。</p>
+          <p>连接 DeepSeek Harness。Research Workspace 由当前 Research Project 绑定。</p>
         </div>
         <button class="icon-button subtle" type="button" id="close-settings" aria-label="关闭设置"><svg><use href="#i-x"/></svg></button>
       </div>
