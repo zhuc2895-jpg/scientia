@@ -366,9 +366,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .settings-dialog input { width: 100%; height: 39px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-soft); color: var(--ink); padding: 0 11px; outline: 0; font-size: 12px; transition: .15s ease; }
 .settings-dialog input:focus { border-color: color-mix(in srgb, var(--moss) 54%, var(--line)); background: var(--panel); box-shadow: 0 0 0 3px color-mix(in srgb, var(--moss) 8%, transparent); }
 .settings-dialog input[readonly] { color: var(--muted); font-family: var(--font-mono); font-size: 10px; }
-.secret-field { position: relative; }
-.secret-field input { padding-right: 45px; font-family: var(--font-mono); }
-.secret-field .icon-button { position: absolute; right: 4px; top: 3px; }
+.secret-actions { display: flex; align-items: center; gap: 12px; }
 .field-help { margin: 6px 1px 0; color: var(--faint); font-size: 9.5px; line-height: 1.55; }
 .field-help code { font-family: var(--font-mono); }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

@@ -4,8 +4,10 @@ import test from 'node:test';
 import {
   archiveRecoveredRunForContinuation,
   buildRunContinuationPrompt,
+  canContinueRecoveredRun,
   conversationSnapshot,
   reconcileRunManifest,
+  prepareConversationForNextRun,
   recoverInterruptedRuns,
 } from '../../app/conversation-state.js';
 
@@ -70,6 +72,7 @@ test('run recovery is idempotent after the first review marker is persisted', ()
 
   assert.equal(first.changed, true);
   assert.equal(second.changed, false);
+  assert.deepEqual(second.manifestReviewIds, ['conversation-idempotent']);
   assert.equal(second.conversations[0].activities.length, 1);
 });
 
@@ -194,4 +197,48 @@ test('continuation brief carries manifest context without asking to replay side 
   assert.match(prompt, /Searching literature/);
   assert.match(prompt, /Partial evidence summary/);
   assert.match(prompt, /Do not repeat completed tool actions/);
+});
+
+test('a normal new run cannot replace an unresolved recovered run', () => {
+  const conversation = {
+    id: 'conversation-6',
+    title: 'Protected recovery',
+    messages: [{ id: 'assistant-6', role: 'assistant', status: 'needs-review' }],
+    activeRun: {
+      runId: 'run-6',
+      assistantId: 'assistant-6',
+      status: 'running',
+      recoveryStatus: 'needs-review',
+      manifestPath: '.science/runs/conversation-6/run-6/manifest.json',
+      manifest: { status: 'running' },
+    },
+  };
+
+  assert.throws(() => prepareConversationForNextRun(conversation, {
+    nextRunId: 'run-7',
+    continuedAt: '2026-11-17T01:10:00.000Z',
+  }), /显式继续/);
+});
+
+test('continuation requires a successfully loaded manifest', () => {
+  const base = {
+    id: 'conversation-7',
+    messages: [{ id: 'assistant-7', role: 'assistant', status: 'needs-review' }],
+    activeRun: {
+      runId: 'run-7',
+      assistantId: 'assistant-7',
+      recoveryStatus: 'needs-review',
+      manifestPath: '.science/runs/conversation-7/run-7/manifest.json',
+    },
+  };
+
+  assert.equal(canContinueRecoveredRun(base), false);
+  assert.equal(canContinueRecoveredRun({
+    ...base,
+    activeRun: { ...base.activeRun, manifestError: 'manifest unavailable' },
+  }), false);
+  assert.equal(canContinueRecoveredRun({
+    ...base,
+    activeRun: { ...base.activeRun, manifest: { status: 'running' } },
+  }), true);
 });

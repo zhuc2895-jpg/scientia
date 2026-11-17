@@ -1,7 +1,8 @@
 import {
-  archiveRecoveredRunForContinuation,
   buildRunContinuationPrompt,
+  canContinueRecoveredRun,
   conversationSnapshot,
+  prepareConversationForNextRun,
   reconcileRunManifest,
   recoverInterruptedRuns,
   tryNormalizeConversation,
@@ -75,7 +76,8 @@ const els = {
   settingsDialog: $('#settings-dialog'),
   settingsForm: $('#settings-form'),
   settingsStatus: $('#settings-status'),
-  apiKey: $('#api-key'),
+  setApiKey: $('#set-api-key'),
+  clearApiKey: $('#clear-api-key'),
   keyHelp: $('#key-help'),
   modelName: $('#model-name'),
   maxTokens: $('#max-tokens'),
@@ -464,7 +466,7 @@ function emptyAssistantMarkup(message) {
   }
   if (message.status === 'needs-review') {
     const conversation = activeConversation();
-    const canContinue = conversation?.activeRun?.assistantId === message.id && conversation.activeRun.recoveryStatus === 'needs-review';
+    const canContinue = conversation?.activeRun?.assistantId === message.id && canContinueRecoveredRun(conversation);
     return `<div class="message-needs-review"><strong>运行已中断，需要复核</strong><span>${escapeHTML(message.statusText || '应用重启前的研究运行尚未完成。')}</span>${canContinue ? '<button type="button" class="continue-run-button" data-continue-run="true">复核并继续研究</button>' : ''}</div>${message.content ? `<div class="markdown">${renderMarkdown(message.content)}</div>` : ''}`;
   }
   return `<div class="markdown">${renderMarkdown(message.content || '任务已完成，但没有返回文本。')}</div>${artifactMarkup(message)}`;
@@ -589,7 +591,7 @@ async function refreshWorkspace() {
     return;
   }
   try {
-    state.workspace = await bridge.inspectWorkspace(state.config.workspace);
+    state.workspace = await bridge.inspectWorkspace();
     renderWorkspace();
   } catch (error) {
     showToast(error.message || '无法读取研究工作区。');
@@ -870,9 +872,12 @@ async function sendResearchTask({ promptOverride = null, displayContent = null, 
   const userContent = text || '请先检查我附上的研究资料，并告诉我下一步最可靠的处理方式。';
   const continuationOfRunId = continuation ? conversation.activeRun?.runId || null : null;
 
-  if (continuation) {
-    conversation = archiveRecoveredRunForContinuation(conversation, { continuedAt: createdAt, nextRunId: runId });
+  try {
+    conversation = prepareConversationForNextRun(conversation, { continuedAt: createdAt, nextRunId: runId, continuation });
     state.conversations = state.conversations.map((item) => item.id === conversation.id ? conversation : item);
+  } catch (error) {
+    showToast(error.message || '当前会话不能启动新的研究任务。');
+    return;
   }
 
   if (conversation.title === '新的研究') {
@@ -932,7 +937,7 @@ async function sendResearchTask({ promptOverride = null, displayContent = null, 
 async function continueRecoveredRun(messageId) {
   const conversation = activeConversation();
   const run = conversation?.activeRun;
-  if (!conversation || !run || run.assistantId !== messageId || run.recoveryStatus !== 'needs-review') {
+  if (!conversation || !run || run.assistantId !== messageId || !canContinueRecoveredRun(conversation)) {
     showToast('没有可继续的已恢复研究运行。');
     return;
   }
@@ -987,7 +992,7 @@ async function importDroppedPaths(paths) {
     return;
   }
   try {
-    const imported = await bridge.importFiles(state.config.workspace, paths);
+    const imported = await bridge.importFiles(paths);
     state.pendingAttachments.push(...imported);
     renderPendingAttachments();
     void refreshWorkspace();
@@ -1012,11 +1017,9 @@ function settingsStatusMarkup() {
 
 function populateSettings() {
   const config = state.config || {};
-  els.apiKey.value = '';
-  els.apiKey.placeholder = config.apiKeyPresent ? '已安全保存；留空则保持不变' : 'sk-…';
   els.keyHelp.textContent = config.apiKeyPresent
     ? `密钥已保存。${config.apiKeyPersisted ? '使用系统安全存储加密。' : '本次会话有效，当前系统无法持久加密。'}`
-    : '密钥只保存在主进程；系统支持时使用安全存储加密。';
+    : '密钥由主进程的原生输入窗口读取；系统支持时使用安全存储加密。';
   els.modelName.value = config.model || 'deepseek-v4-flash';
   els.maxTokens.value = config.maxTokens || 49152;
   els.baseUrl.value = config.baseUrl || '';
@@ -1035,13 +1038,6 @@ function closeSettings() {
 
 async function saveSettings(event) {
   event.preventDefault();
-  const config = state.config || {};
-  const apiKey = els.apiKey.value.trim();
-  if (!config.apiKeyPresent && !apiKey) {
-    showToast('请填写 DeepSeek API Key。');
-    els.apiKey.focus();
-    return;
-  }
   const workspace = els.workspacePathInput.value.trim();
   if (!workspace) {
     showToast('请选择研究目录。');
@@ -1051,7 +1047,6 @@ async function saveSettings(event) {
   els.saveSettings.textContent = '正在连接…';
   try {
     state.config = await bridge.configSave({
-      apiKey,
       baseUrl: els.baseUrl.value.trim(),
       model: els.modelName.value.trim(),
       maxTokens: Number(els.maxTokens.value),
@@ -1066,6 +1061,34 @@ async function saveSettings(event) {
   } finally {
     els.saveSettings.disabled = false;
     els.saveSettings.textContent = '保存并连接';
+  }
+}
+
+async function captureApiKey() {
+  els.setApiKey.disabled = true;
+  try {
+    state.config = await bridge.setApiKey();
+    populateSettings();
+    renderAll();
+    showToast('DeepSeek API Key 已由主进程安全保存。');
+  } catch (error) {
+    showToast(error.message || '无法保存 API Key。');
+  } finally {
+    els.setApiKey.disabled = false;
+  }
+}
+
+async function clearApiKey() {
+  els.clearApiKey.disabled = true;
+  try {
+    state.config = await bridge.clearApiKey();
+    populateSettings();
+    renderAll();
+    showToast('DeepSeek API Key 已移除。');
+  } catch (error) {
+    showToast(error.message || '无法移除 API Key。');
+  } finally {
+    els.clearApiKey.disabled = false;
   }
 }
 
@@ -1087,7 +1110,7 @@ function bindEvents() {
   });
 
   $('#context-workspace').addEventListener('click', () => {
-    if (state.config?.workspace) void bridge.openWorkspace(state.config.workspace);
+    if (state.config?.workspace) void bridge.openWorkspace();
     else openSettings();
   });
   $('#context-files').addEventListener('click', () => void attachResearchFiles());
@@ -1143,9 +1166,8 @@ function bindEvents() {
       showToast(error.message || '无法选择目录。');
     }
   });
-  $('#toggle-key-visibility').addEventListener('click', () => {
-    els.apiKey.type = els.apiKey.type === 'password' ? 'text' : 'password';
-  });
+  els.setApiKey.addEventListener('click', () => void captureApiKey());
+  els.clearApiKey.addEventListener('click', () => void clearApiKey());
   $('#open-runtime-folder').addEventListener('click', () => { void bridge.openData(); });
 
   $('#starter-grid').addEventListener('click', (event) => {
@@ -1200,12 +1222,12 @@ function bindEvents() {
     }
     const openArtifact = event.target.closest('[data-open-artifact]');
     if (openArtifact) {
-      void bridge.openPath(state.config.workspace, openArtifact.dataset.openArtifact);
+      void bridge.openPath(openArtifact.dataset.openArtifact);
       return;
     }
     const revealArtifact = event.target.closest('[data-reveal-artifact]');
     if (revealArtifact) {
-      void bridge.revealPath(state.config.workspace, revealArtifact.dataset.revealArtifact);
+      void bridge.revealPath(revealArtifact.dataset.revealArtifact);
       return;
     }
     const copyButton = event.target.closest('.code-copy');
@@ -1229,18 +1251,18 @@ function bindEvents() {
 
   els.recentFiles.addEventListener('click', (event) => {
     const row = event.target.closest('[data-open-file]');
-    if (row) void bridge.openPath(state.config.workspace, row.dataset.openFile);
+    if (row) void bridge.openPath(row.dataset.openFile);
   });
   els.recentFiles.addEventListener('keydown', (event) => {
     const row = event.target.closest('[data-open-file]');
     if (row && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
-      void bridge.openPath(state.config.workspace, row.dataset.openFile);
+      void bridge.openPath(row.dataset.openFile);
     }
   });
   $('#refresh-workspace').addEventListener('click', () => void refreshWorkspace());
   $('#open-workspace').addEventListener('click', () => {
-    if (state.config?.workspace) void bridge.openWorkspace(state.config.workspace);
+    if (state.config?.workspace) void bridge.openWorkspace();
     else openSettings();
   });
 
@@ -1298,7 +1320,7 @@ async function init() {
     const recovered = recoverInterruptedRuns(Array.isArray(productState.conversations) ? productState.conversations : []);
     state.conversations = recovered.conversations;
     state.activeId = productState.activeId || null;
-    for (const conversationId of recovered.conversationIds) {
+    for (const conversationId of recovered.manifestReviewIds) {
       let conversation = state.conversations.find((item) => item.id === conversationId);
       if (!conversation) continue;
       if (conversation.activeRun?.runId && state.config?.workspace) {
@@ -1361,6 +1383,8 @@ function createPreviewBridge() {
   return {
     async configLoad() { return { ...previewConfig }; },
     async configSave(payload) { Object.assign(previewConfig, payload, { apiKeyPresent: true, harnessInstalled: true }); return { ...previewConfig }; },
+    async setApiKey() { previewConfig.apiKeyPresent = true; return { ...previewConfig }; },
+    async clearApiKey() { previewConfig.apiKeyPresent = false; return { ...previewConfig }; },
     async productStateLoad() { return previewProductState(); },
     async productStateMigrate({ conversations, activeId }) {
       if (!previewMigrationComplete) {
@@ -1410,7 +1434,7 @@ function createPreviewBridge() {
     async openPath() { return ''; },
     async revealPath() { return ''; },
     async pickFiles() { return []; },
-    async importFiles(_workspace, paths) {
+    async importFiles(paths) {
       return paths.map((filePath, index) => ({ name: basename(filePath), relativePath: `.science/inputs/demo/${index + 1}-${basename(filePath)}`, size: 1024 }));
     },
     getPathForFile(file) { return file?.name || ''; },

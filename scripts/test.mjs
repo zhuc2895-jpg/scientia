@@ -16,13 +16,14 @@ function run(label, command, args) {
   console.log(`OK   ${label}`);
 }
 
-for (const file of ['app/app.js', 'app/conversation-state.js', 'electron/app-lifecycle.js', 'electron/main.js', 'electron/product-repository.js', 'electron/run-recovery.js', 'electron/runtime.js', 'electron/preload.cjs']) {
+for (const file of ['app/app.js', 'app/conversation-state.js', 'electron/app-lifecycle.js', 'electron/main.js', 'electron/native-secret-input.js', 'electron/product-repository.js', 'electron/run-recovery.js', 'electron/runtime.js', 'electron/preload.cjs']) {
   run(`syntax ${file}`, process.execPath, ['--check', file]);
 }
 run('Application state tests', process.execPath, [
   '--test',
   'electron/tests/app-lifecycle.test.mjs',
   'electron/tests/conversation-state.test.mjs',
+  'electron/tests/native-secret-input.test.mjs',
   'electron/tests/product-repository.test.mjs',
   'electron/tests/run-recovery.test.mjs',
 ]);

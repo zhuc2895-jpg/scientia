@@ -40,7 +40,7 @@ npm run doctor
 3. 模型名（默认 `deepseek-v4-flash`）
 4. 研究目录
 
-API Key 使用 Electron `safeStorage` 加密；系统不支持安全存储时只保留在当前进程内，不写入磁盘。
+API Key 由主进程调用原生 Windows 输入窗口读取，不进入 renderer；使用 Electron `safeStorage` 加密，系统不支持安全存储时只保留在当前进程内，不写入磁盘。
 
 ## 运行结构
 
@@ -81,6 +81,7 @@ Electron shell
 - `sdk-minimal` 的本地 shell 没有目录沙箱。Agent 具备当前用户进程可见的文件与命令权限，请只在你信任的研究目录中运行。
 - 应用不会把工作区资料当作指令执行；但资料内容仍会进入模型上下文，因此仍需警惕恶意文档。
 - 附件会被复制到 `<workspace>/.science/inputs/`。原始数据不会被覆盖。
+- 文件检查、打开和导入只作用于当前 Research Project 绑定的 Workspace，不接受 renderer 临时指定的根目录。
 - 当前版本是本地开发运行版；正式分发前应补齐 Python runtime 打包、签名和自动更新。
 
 ## 参考

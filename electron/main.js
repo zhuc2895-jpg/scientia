@@ -11,6 +11,7 @@ import { createDaemonManager } from './runtime.js';
 import { openProductRepository } from './product-repository.js';
 import { createAppLifecycle } from './app-lifecycle.js';
 import { readRunManifest } from './run-recovery.js';
+import { captureSecretFromUser } from './native-secret-input.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -104,6 +105,12 @@ async function ensureWorkspace(workspace) {
   return workspace;
 }
 
+function currentProjectWorkspace() {
+  const workspacePath = productRepository?.loadState().project?.workspacePath;
+  if (!workspacePath) throw new Error('Research Project 尚未绑定研究工作区。');
+  return normalizeWorkspace(workspacePath);
+}
+
 function pythonExecutable() {
   const candidates = [
     process.env.SCIENTIA_PYTHON,
@@ -152,6 +159,21 @@ async function currentPublicConfig() {
   const config = await readConfigFile();
   const harness = await checkHarness();
   return publicConfig(config, harness);
+}
+
+async function saveApiKey(apiKey) {
+  const previous = await readConfigFile();
+  const next = {
+    ...previous,
+    apiKeyEncrypted: apiKey && safeStorage.isEncryptionAvailable()
+      ? safeStorage.encryptString(apiKey).toString('base64')
+      : '',
+  };
+  await writeConfigFile(next);
+  sessionApiKey = apiKey;
+  cachedHarnessStatus = null;
+  if (runtimeManager) await runtimeManager.restart();
+  return publicConfig(next, await checkHarness());
 }
 
 function createWindow() {
@@ -411,17 +433,6 @@ function installIpc() {
       maxTokens: Math.min(200000, Math.max(4096, Number(payload.maxTokens) || DEFAULT_MAX_TOKENS)),
       workspace,
     };
-    const apiKey = typeof payload.apiKey === 'string' ? payload.apiKey.trim() : '';
-    let nextSessionApiKey = sessionApiKey;
-    if (apiKey) {
-      nextSessionApiKey = apiKey;
-      next.apiKeyEncrypted = safeStorage.isEncryptionAvailable()
-        ? safeStorage.encryptString(apiKey).toString('base64')
-        : '';
-    } else if (payload.clearApiKey === true) {
-      nextSessionApiKey = '';
-      next.apiKeyEncrypted = '';
-    }
     productRepository.rebindWorkspace(workspace);
     try {
       await writeConfigFile(next);
@@ -429,11 +440,16 @@ function installIpc() {
       try { productRepository.rebindWorkspace(previous.workspace); } catch { /* the database remains canonical */ }
       throw error;
     }
-    sessionApiKey = nextSessionApiKey;
     cachedHarnessStatus = null;
     if (runtimeManager) await runtimeManager.restart();
     return publicConfig(next, await checkHarness());
   });
+
+  ipcMain.handle('secret:set-api-key', async () => {
+    const apiKey = await captureSecretFromUser();
+    return saveApiKey(apiKey);
+  });
+  ipcMain.handle('secret:clear-api-key', async () => saveApiKey(''));
 
   ipcMain.handle('workspace:pick', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -443,14 +459,14 @@ function installIpc() {
     return result.canceled ? null : result.filePaths[0];
   });
 
-  ipcMain.handle('workspace:inspect', async (_event, workspace) => inspectWorkspace(workspace));
-  ipcMain.handle('workspace:open', async (_event, workspace) => shell.openPath(await ensureWorkspace(normalizeWorkspace(workspace))));
-  ipcMain.handle('path:open', async (_event, { workspace, relativePath }) => {
-    const resolved = safeWorkspacePath(normalizeWorkspace(workspace), relativePath);
+  ipcMain.handle('workspace:inspect', async () => inspectWorkspace(currentProjectWorkspace()));
+  ipcMain.handle('workspace:open', async () => shell.openPath(await ensureWorkspace(currentProjectWorkspace())));
+  ipcMain.handle('path:open', async (_event, { relativePath }) => {
+    const resolved = safeWorkspacePath(currentProjectWorkspace(), relativePath);
     return shell.openPath(resolved);
   });
-  ipcMain.handle('path:reveal', async (_event, { workspace, relativePath }) => {
-    const resolved = safeWorkspacePath(normalizeWorkspace(workspace), relativePath);
+  ipcMain.handle('path:reveal', async (_event, { relativePath }) => {
+    const resolved = safeWorkspacePath(currentProjectWorkspace(), relativePath);
     shell.showItemInFolder(resolved);
   });
 
@@ -461,7 +477,7 @@ function installIpc() {
     });
     return result.canceled ? [] : result.filePaths;
   });
-  ipcMain.handle('files:import', async (_event, { workspace, paths }) => importFiles(workspace, paths));
+  ipcMain.handle('files:import', async (_event, { paths }) => importFiles(currentProjectWorkspace(), paths));
   ipcMain.handle('agent:run', async (event, payload) => runAgent(payload, event.sender));
   ipcMain.handle('agent:cancel', async (_event, runId) => cancelAgent(runId));
   ipcMain.handle('research:recover-run', async (_event, payload) => {

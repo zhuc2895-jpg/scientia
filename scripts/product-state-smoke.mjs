@@ -199,6 +199,8 @@ async function stopApp({ graceful = true } = {}) {
 try {
   cdp = await connect(await launchApp());
   await waitForRenderer(cdp);
+  assert.equal(await evaluate(cdp, `!document.querySelector('#api-key') && Boolean(document.querySelector('#set-api-key'))`), true);
+  console.log('OK   API key input never enters the renderer');
   await evaluate(cdp, 'window.scienceAgent.windowControl("close")');
   await delay(300);
   assert.equal(await evaluate(cdp, 'document.hidden'), true);
@@ -211,7 +213,7 @@ try {
   const isolatedWorkspace = path.join(userData, 'research-workspace');
   await evaluate(cdp, `(async () => {
     const config = await window.scienceAgent.configLoad();
-    return window.scienceAgent.configSave({ ...config, workspace: ${JSON.stringify(isolatedWorkspace)}, apiKey: '' });
+    return window.scienceAgent.configSave({ ...config, workspace: ${JSON.stringify(isolatedWorkspace)} });
   })()`);
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);
@@ -221,7 +223,7 @@ try {
   const expectedId = created.activeId;
   const workspaceGuard = await evaluate(cdp, `(async () => {
     const config = await window.scienceAgent.configLoad();
-    const rebound = await window.scienceAgent.configSave({ ...config, workspace: 'C:\\\\Research\\\\Other Project', apiKey: '' })
+    const rebound = await window.scienceAgent.configSave({ ...config, workspace: 'C:\\\\Research\\\\Other Project' })
       .then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message }));
     return { initialWorkspace: config.workspace, project: (await window.scienceAgent.productStateLoad()).project, rebound };
   })()`);
@@ -230,6 +232,9 @@ try {
   assert.match(workspaceGuard.rebound.message, /已有会话/);
   console.log('OK   Conversation ownership blocks silent workspace rebinding');
   const workspace = workspaceGuard.initialWorkspace;
+  const inspectedWorkspace = await evaluate(cdp, `window.scienceAgent.inspectWorkspace('C:\\\\Windows')`);
+  assert.equal(inspectedWorkspace.workspace, workspace);
+  console.log('OK   Filesystem access ignores renderer-supplied workspace roots');
 
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);

@@ -277,12 +277,12 @@
           <span>正在检查 Harness…</span>
         </div>
 
-        <label class="field-label" for="api-key">DeepSeek API Key</label>
-        <div class="secret-field">
-          <input id="api-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
-          <button type="button" class="icon-button subtle" id="toggle-key-visibility" aria-label="显示或隐藏 API Key"><svg><use href="#i-eye"/></svg></button>
+        <div class="field-label">DeepSeek API Key</div>
+        <div class="secret-actions">
+          <button type="button" class="secondary-button" id="set-api-key">安全设置 API Key</button>
+          <button type="button" class="text-button" id="clear-api-key">移除密钥</button>
         </div>
-        <div class="field-help" id="key-help">密钥只保存在主进程，使用系统安全存储加密。</div>
+        <div class="field-help" id="key-help">密钥由主进程的原生输入窗口读取，不进入 renderer。</div>
 
         <div class="field-grid">
           <div>
