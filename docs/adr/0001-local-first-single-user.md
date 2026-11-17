@@ -1,0 +1,3 @@
+# Local-first, single-user execution
+
+SCIENTIA will ship as a local-first desktop application for one user, with research execution and project data staying on that machine. This avoids introducing accounts, teams, cloud hosts, synchronization, and billing before the research workflow is proven. The trade-off is that cross-device continuity and managed cloud execution are explicitly out of scope for the first release.

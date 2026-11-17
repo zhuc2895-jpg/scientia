@@ -1,0 +1,3 @@
+# Minimum audit set without hidden reasoning
+
+SCIENTIA retains the minimum reproducibility and accountability record: prompt versions, tool-call summaries, model routing, source hashes, Artifact Version hashes, and Checkpoint decisions. It does not persist hidden model reasoning chains. Raw external request and response bodies are retained only when the Project Data Processing Policy allows them. This preserves auditability while limiting sensitive-data exposure and misleading “reasoning trace” artifacts.

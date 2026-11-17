@@ -1,0 +1,3 @@
+# Iterative research stage graph
+
+A Research Project advances through an iterative stage graph: `Scoping → Evidence → Inquiry → Synthesis → Manuscript → Release`. Evidence, Inquiry, and Synthesis may loop, while Manuscript and Release require explicit freeze points. Research Mode is redesigned as the work contract for the current stage rather than a peer-level task preset. This preserves scientific iteration while giving end-to-end delivery a stable lifecycle.

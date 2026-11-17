@@ -1,0 +1,3 @@
+# Project-level external data policy
+
+Every Research Project carries a Data Processing Policy of `standard`, `sensitive`, or `local-only`. `standard` allows task context and selected text chunks to reach the configured Model Provider and approved search services. `sensitive` requires explicit confirmation before external transmission. `local-only` disables external model and search calls in the first release. This makes local-first execution compatible with external model use without silently treating all research material as safe to transmit.

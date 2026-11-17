@@ -1,0 +1,3 @@
+# One visible agent, one active run
+
+SCIENTIA exposes exactly one persistent Science Agent identity. Controlled Internal Research Tasks may perform retrieval, verification, or review, but they never become user-facing agents and do not own the final result. Only one Research Run executes at a time. Closing the window does not stop the run, and restart recovery resumes from the Run Manifest without repeating side effects. This favors predictability, provenance, and recoverability over parallel throughput.

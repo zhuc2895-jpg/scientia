@@ -1,0 +1,3 @@
+# Research Project owns research state
+
+A Research Project maps one-to-one to a local Research Workspace and one-to-many to Conversations. Sources, Evidence Records, Artifacts, and run logs belong to the Project rather than to an individual Conversation. This preserves long-lived research continuity and prevents a conversation from resolving files against a different global workspace. The cost is that project creation and switching become explicit product operations rather than implicit chat state.

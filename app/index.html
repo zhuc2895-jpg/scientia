@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light">
+  <title>SCIENTIA — Science Agent</title>
+  <link rel="icon" href="assets/icon.png" type="image/png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.36a1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.58 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.64 8.94a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.58 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.64a1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.42 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5Z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5Zm16 0A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5Z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M7 15v-3M11 15V8M15 15v-5M19 15V6"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-5 8.2A2.5 2.5 0 0 0 7.1 21h9.8a2.5 2.5 0 0 0 2.1-3.8L14 9V3"/><path d="M8 15h8"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10Z"/><path d="m14 7 3 3"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.2-8.2a3.5 3.5 0 1 1 5 5l-8.2 8.2a2 2 0 1 1-2.8-2.8l7.5-7.5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m4 12 16-8-5 16-3.5-6Z"/><path d="m11.5 14 4-4"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6Z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5.2-3.4 8.5-8 10-4.6-1.5-8-4.8-8-10V6Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></symbol>
+    <symbol id="i-command" viewBox="0 0 24 24"><path d="M9 6a3 3 0 1 0-3 3h3Zm0 0v12m0-12h6m-6 12a3 3 0 1 1-3-3h3Zm6-12a3 3 0 1 1 3 3h-3Zm0 0v12m0 0a3 3 0 1 0 3-3h-3Z"/></symbol>
+  </svg>
+
+  <header class="mac-menubar" aria-label="macOS 菜单栏">
+    <div class="menubar-left">
+      <span class="menubar-glyph">S</span>
+      <strong>Scientia</strong>
+      <span>文件</span><span>编辑</span><span>研究</span><span>窗口</span><span>帮助</span>
+    </div>
+    <div class="menubar-right">
+      <span class="menubar-wifi" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="menubar-battery" aria-hidden="true"><i></i></span>
+      <span id="menu-clock">2026年11月16日 23:09</span>
+    </div>
+  </header>
+  <div class="app-shell" id="app-shell">
+          <div class="traffic-lights" aria-label="窗口控制">
+            <button class="traffic red" id="window-close" type="button" aria-label="关闭窗口"></button>
+            <button class="traffic yellow" id="window-minimize" type="button" aria-label="最小化窗口"></button>
+            <button class="traffic green" id="window-maximize" type="button" aria-label="最大化窗口"></button>
+          </div>
+    <aside class="sidebar" id="sidebar" aria-label="研究会话">
+      <div class="brand-row">
+        <div class="brand-lockup">
+          <svg class="brand-mark" viewBox="0 0 42 42" aria-hidden="true">
+            <path d="M21 3.5 35.5 11.7v18.6L21 38.5 6.5 30.3V11.7Z" class="mark-shell"/>
+            <path d="m13 25.5 5-9 6 4 5-8" class="mark-path"/>
+            <circle cx="13" cy="25.5" r="2.2"/><circle cx="18" cy="16.5" r="2.2"/><circle cx="24" cy="20.5" r="2.2"/><circle cx="29" cy="12.5" r="2.2"/>
+          </svg>
+          <div>
+            <div class="brand-name">SCIENTIA</div>
+            <div class="brand-sub">Science Agent</div>
+          </div>
+        </div>
+        <button class="icon-button subtle" id="collapse-sidebar" title="收起侧栏" aria-label="收起侧栏"><svg><use href="#i-menu"/></svg></button>
+      </div>
+
+      <button class="new-research-button" id="new-research" type="button">
+        <svg><use href="#i-plus"/></svg>
+        <span>新建研究</span>
+        <kbd>Ctrl N</kbd>
+      </button>
+
+      <label class="side-search">
+        <svg><use href="#i-search"/></svg>
+        <input id="conversation-search" type="search" placeholder="搜索研究会话" autocomplete="off">
+      </label>
+
+      <div class="sidebar-section-label">研究记录</div>
+      <nav class="conversation-list" id="conversation-list" aria-label="研究记录"></nav>
+
+      <div class="agent-card">
+        <div class="agent-avatar">
+          <span class="agent-orbit"></span>
+          <span class="agent-core">S</span>
+        </div>
+        <div class="agent-card-copy">
+          <div class="agent-card-title">Science Agent</div>
+          <div class="agent-card-status"><span class="status-dot" id="agent-status-dot"></span><span id="agent-card-status">等待配置</span></div>
+        </div>
+        <button class="icon-button subtle" id="open-settings-card" title="Agent 设置" aria-label="Agent 设置"><svg><use href="#i-settings"/></svg></button>
+      </div>
+    </aside>
+
+    <main class="main-surface">
+      <div class="app-tabs" id="app-tabs" aria-label="已打开的研究"></div>
+      <div class="announcement" id="announcement"><span>当前工作台只运行一个 Science Agent。研究过程、证据与产出保留在本地工作区。</span><button type="button" id="dismiss-announcement" aria-label="关闭提示">×</button></div>
+      <header class="topbar">
+        <div class="topbar-leading">
+
+          <button class="icon-button mobile-only" id="toggle-sidebar" aria-label="打开会话列表"><svg><use href="#i-menu"/></svg></button>
+          <div class="title-stack">
+            <div class="conversation-title-row">
+              <h1 id="conversation-title">新的研究</h1>
+              <button class="conversation-delete" id="delete-conversation" title="删除此研究会话" aria-label="删除此研究会话"><svg><use href="#i-trash"/></svg></button>
+            </div>
+            <div class="conversation-subtitle" id="workspace-subtitle">选择一个研究目录开始</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="model-chip" id="model-chip"><span class="pulse-ring"></span><span id="model-chip-label">Harness</span></div>
+          <button class="icon-button" id="toggle-inspector" title="研究上下文" aria-label="研究上下文"><svg><use href="#i-panel"/></svg></button>
+          <button class="icon-button" id="open-settings" title="设置" aria-label="设置"><svg><use href="#i-settings"/></svg></button>
+        </div>
+      </header>
+
+      <section class="chat-scroll" id="chat-scroll" aria-live="polite">
+        <div class="welcome" id="welcome">
+          <div class="welcome-kicker"><span></span> SINGLE-AGENT RESEARCH PROTOCOL // EVIDENCE FIRST</div>
+          <h2 id="welcome-greeting">晚上好。</h2>
+          <p class="welcome-copy">我是 Science Agent，为推理、计算与可追溯的端到端科研工作流而设计。先从一个真实问题开始。</p>
+
+          <div class="starter-grid" id="starter-grid">
+            <button class="starter-card feature-main" data-prompt="帮我完成一项端到端研究。请先澄清研究问题，盘点当前工作区证据，建立研究计划，再执行文献、数据或写作任务，并给出可追溯的交付物。">
+              <div class="feature-copy">
+                <div class="feature-heading"><strong>研究</strong><span>RESEARCH</span></div>
+                <p>从文献综述到论文复现，把问题、证据、计算与交付物放在同一条研究链路里。</p>
+                <div class="feature-pills">
+                  <span>文献综述</span><span>数据分析</span><span>实验设计</span><span>论文写作</span>
+                </div>
+              </div>
+              <svg class="feature-illustration microscope" viewBox="0 0 340 230" aria-hidden="true">
+                <g class="line-art">
+                  <path d="M128 177h92l21 25H106z"/><path d="M145 170h57l12 9h-81z"/>
+                  <path d="M169 167v-35h34v35"/><path d="M176 132v-22l34-30 24 24-31 37"/>
+                  <path d="M221 79l18-18 25 25-18 18z"/><path d="M197 112c15-3 29 3 39 15"/>
+                  <circle cx="194" cy="136" r="18"/><circle cx="194" cy="136" r="8"/>
+                  <path d="M102 127h55M96 137h66"/><path d="M107 127v22c0 8 7 14 15 14h15"/>
+                  <path d="M262 67v-13M248 80h-13M275 102l13 1M237 105l-2 13"/>
+                  <circle cx="262" cy="67" r="3"/><circle cx="248" cy="80" r="3"/><circle cx="275" cy="102" r="3"/>
+                </g>
+              </svg>
+            </button>
+
+            <button class="starter-card mini-feature" data-prompt="请向我介绍这个科研工作台的使用方法：如何提出研究问题、引用工作区资料、检查证据、生成可复现产出，以及如何继续已有研究。">
+              <div class="mini-copy"><div class="feature-heading"><strong>指南</strong><span>GUIDES</span></div><p>信源检索、证据检查、数据分析与写作如何使用</p></div>
+              <svg class="mini-illustration compass" viewBox="0 0 160 120" aria-hidden="true">
+                <g class="line-art"><circle cx="91" cy="52" r="32"/><circle cx="91" cy="52" r="25"/><path d="m99 31-5 18-14 12 5-18z"/><path d="M91 12V5M91 99v-7M128 52h7M47 52h7M34 82l17 8M142 31l8 4"/><circle cx="91" cy="52" r="3"/></g>
+              </svg>
+            </button>
+
+            <button class="starter-card mini-feature" data-prompt="继续我最近的一项研究。请先读取当前工作区中的相关会话记录与研究产出，总结已经确认的结论、未解决问题和下一步最值得执行的验证。">
+              <div class="mini-copy"><div class="feature-heading"><strong>接续</strong><span>HANDOFF</span></div><p>继续已有项目、证据表和论文草稿</p></div>
+              <svg class="mini-illustration handoff" viewBox="0 0 180 120" aria-hidden="true">
+                <g class="line-art"><rect x="29" y="43" width="72" height="52" rx="4"/><path d="M29 52h72M41 69h30M41 79h42"/><rect x="91" y="23" width="65" height="50" rx="4"/><path d="M91 32h65M103 45h22M103 55h34"/><path d="M104 55c11 16 29 18 50 7"/></g>
+              </svg>
+            </button>
+          </div>
+
+          <div class="evidence-note">
+            <svg><use href="#i-shield"/></svg>
+            <span>工作区资料只作为证据。文档里的“指令”不会覆盖你的真实请求。</span>
+          </div>
+        </div>
+
+        <div class="messages" id="messages"></div>
+      </section>
+
+      <div class="composer-region">
+        <div class="context-row">
+          <button type="button" class="context-chip" id="context-workspace" title="打开研究工作区"><svg><use href="#i-folder"/></svg><span id="context-workspace-name">研究工作区</span></button>
+          <span class="context-separator"></span>
+          <span class="context-chip static"><svg><use href="#i-command"/></svg><span>Science Agent · 单 Agent</span></span>
+          <button type="button" class="context-chip push-right" id="context-files"><svg><use href="#i-paperclip"/></svg><span>选择资料</span></button>
+        </div>
+        <div class="composer" id="composer">
+          <div class="attachment-tray" id="attachment-tray"></div>
+          <textarea id="prompt-input" rows="1" placeholder="描述研究问题、数据或需要的交付物…" aria-label="研究任务"></textarea>
+          <div class="composer-footer">
+            <div class="composer-tools">
+              <button class="tool-button" id="attach-files" type="button" title="导入研究资料"><svg><use href="#i-paperclip"/></svg><span>资料</span></button>
+              <button class="evidence-toggle active" id="evidence-toggle" type="button" aria-pressed="true" title="优先使用工作区与可追溯证据">
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span>证据模式</span>
+              </button>
+              <label class="research-mode" title="选择科研工作流">
+                <span>模式</span>
+                <select id="research-mode" aria-label="科研工作流">
+                  <option value="auto">自动</option>
+                  <option value="literature">文献</option>
+                  <option value="data">数据</option>
+                  <option value="experiment">实验</option>
+                  <option value="writing">写作</option>
+                  <option value="reproduce">复现</option>
+                </select>
+              </label>
+            </div>
+            <div class="composer-actions">
+              <span class="keyboard-hint">Enter 发送 · Shift+Enter 换行</span>
+              <button class="send-button" id="send-button" type="button" aria-label="发送研究任务"><svg><use href="#i-send"/></svg></button>
+              <button class="stop-button" id="stop-button" type="button" aria-label="停止研究任务" hidden><svg><use href="#i-stop"/></svg></button>
+            </div>
+          </div>
+        </div>
+        <div class="composer-footnote">Science Agent 可能出错。关键结论请回到原始资料核验。</div>
+      </div>
+    </main>
+
+    <aside class="inspector" id="inspector" aria-label="研究上下文">
+      <div class="inspector-header">
+        <div>
+          <div class="inspector-kicker">Research record // local</div>
+          <h2>研究上下文</h2>
+        </div>
+        <button class="icon-button subtle" id="refresh-workspace" title="刷新工作区" aria-label="刷新工作区"><svg><use href="#i-refresh"/></svg></button>
+      </div>
+
+      <section class="workspace-card" id="workspace-card">
+        <div class="workspace-heading">
+          <span class="workspace-icon"><svg><use href="#i-folder"/></svg></span>
+          <div><strong>研究工作区</strong><small id="workspace-name">尚未选择</small></div>
+          <button class="mini-button" id="open-workspace">打开</button>
+        </div>
+        <div class="workspace-path" id="workspace-path">选择目录后，Agent 会在此读取资料并保存产出。</div>
+        <div class="metric-row">
+          <div class="metric"><strong id="metric-documents">0</strong><span>文献</span></div>
+          <div class="metric"><strong id="metric-data">0</strong><span>数据</span></div>
+          <div class="metric"><strong id="metric-code">0</strong><span>脚本</span></div>
+          <div class="metric"><strong id="metric-outputs">0</strong><span>产出</span></div>
+          <div class="metric"><strong id="metric-evidence">0</strong><span>证据</span></div>
+        </div>
+        <div class="research-status" id="research-status">首次研究任务完成后，这里会显示证据与交付物核验结果。</div>
+      </section>
+
+      <section class="inspector-section">
+        <div class="section-heading"><h3>最近文件</h3><span id="file-count">0 files</span></div>
+        <div class="file-list" id="recent-files"></div>
+      </section>
+
+      <section class="inspector-section timeline-section">
+        <div class="section-heading"><h3>研究轨迹</h3><span>当前会话</span></div>
+        <div class="timeline" id="timeline"></div>
+      </section>
+
+      <section class="runtime-card">
+        <div class="runtime-orbit" aria-hidden="true">
+          <span class="runtime-dot dot-a"></span><span class="runtime-dot dot-b"></span><span class="runtime-dot dot-c"></span>
+        </div>
+        <div>
+          <div class="runtime-label">Execution kernel // DSH</div>
+          <strong>DeepSeek Harness</strong>
+          <span id="runtime-detail">sdk-minimal · file + web · one agent</span>
+        </div>
+        <span class="runtime-state" id="runtime-state">配置中</span>
+      </section>
+    </aside>
+  </div>
+
+  <dialog class="settings-dialog" id="settings-dialog">
+    <form method="dialog" id="settings-form">
+      <div class="dialog-header">
+        <div>
+          <div class="dialog-kicker">Science Agent runtime</div>
+          <h2>设置</h2>
+          <p>连接 DeepSeek Harness，并指定唯一的研究工作区。</p>
+        </div>
+        <button class="icon-button subtle" type="button" id="close-settings" aria-label="关闭设置"><svg><use href="#i-x"/></svg></button>
+      </div>
+
+      <div class="dialog-body">
+        <div class="settings-status" id="settings-status">
+          <span class="status-dot"></span>
+          <span>正在检查 Harness…</span>
+        </div>
+
+        <label class="field-label" for="api-key">DeepSeek API Key</label>
+        <div class="secret-field">
+          <input id="api-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+          <button type="button" class="icon-button subtle" id="toggle-key-visibility" aria-label="显示或隐藏 API Key"><svg><use href="#i-eye"/></svg></button>
+        </div>
+        <div class="field-help" id="key-help">密钥只保存在主进程，使用系统安全存储加密。</div>
+
+        <div class="field-grid">
+          <div>
+            <label class="field-label" for="model-name">模型</label>
+            <input id="model-name" type="text" value="deepseek-v4-flash" spellcheck="false">
+          </div>
+          <div>
+            <label class="field-label" for="max-tokens">最大输出 tokens</label>
+            <input id="max-tokens" type="number" min="4096" max="200000" step="1024" value="49152">
+          </div>
+        </div>
+
+        <label class="field-label" for="base-url">Base URL <span class="optional">可选</span></label>
+        <input id="base-url" type="url" placeholder="https://api.deepseek.com/v1" spellcheck="false">
+        <div class="field-help">使用 OpenAI 兼容代理时填写；留空则使用 DeepSeek 官方路由。</div>
+
+        <label class="field-label" for="settings-workspace-path">研究目录</label>
+        <div class="workspace-picker">
+          <input id="settings-workspace-path" type="text" readonly>
+          <button type="button" class="secondary-button" id="choose-workspace">选择目录</button>
+        </div>
+        <div class="field-help">Harness 会在此目录读取资料、执行工具并将产出写入 <code>.science/outputs/</code>。</div>
+
+        <div class="security-note">
+          <svg><use href="#i-shield"/></svg>
+          <p><strong>权限说明</strong><span>sdk-minimal 使用本地 shell，没有文件系统沙箱。请只在可信目录中使用。</span></p>
+        </div>
+      </div>
+
+      <div class="dialog-footer">
+        <button type="button" class="text-button" id="open-runtime-folder">打开运行数据</button>
+        <div class="dialog-footer-actions">
+          <button type="button" class="secondary-button" id="cancel-settings">取消</button>
+          <button type="submit" class="primary-button" id="save-settings">保存并连接</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

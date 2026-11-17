@@ -1,0 +1,19 @@
+{
+  "name": "scientia-science-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A single research-dedicated Science Agent desktop workspace powered by DeepSeek Harness.",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "setup:python": "powershell -ExecutionPolicy Bypass -File scripts/setup.ps1",
+    "doctor": "node scripts/doctor.mjs",
+    "test": "node scripts/test.mjs",
+    "test:product-state": "node scripts/product-state-smoke.mjs"
+  },
+  "devDependencies": {
+    "electron": "^45.3.3"
+  }
+}

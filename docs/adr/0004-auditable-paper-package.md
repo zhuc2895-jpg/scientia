@@ -1,0 +1,3 @@
+# Auditable evidence for paper delivery
+
+A Paper Package cannot present an unverified source as established evidence. Source Records and Evidence Records carry a Verification State of `verified`, `partial`, or `unverified`. Formal citations in a submission package require resolved metadata, a locator, and a short supporting quotation or equivalent evidence. Web snippets are discovery aids, not full-text evidence. This makes provenance auditable at the cost of slower retrieval and export gates that may block incomplete work.

@@ -1,0 +1,25 @@
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const python = path.join(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+
+function run(label, command, args) {
+  const result = spawnSync(command, args, { cwd: root, encoding: 'utf8', env: { ...process.env, PYTHONUTF8: '1' } });
+  if (result.stdout?.trim()) process.stdout.write(result.stdout);
+  if (result.stderr?.trim()) process.stderr.write(result.stderr);
+  if (result.status !== 0) {
+    console.error(`FAIL ${label}`);
+    process.exit(result.status || 1);
+  }
+  console.log(`OK   ${label}`);
+}
+
+for (const file of ['app/app.js', 'electron/main.js', 'electron/product-repository.js', 'electron/runtime.js', 'electron/preload.cjs']) {
+  run(`syntax ${file}`, process.execPath, ['--check', file]);
+}
+run('Product repository tests', process.execPath, ['--test', 'electron/tests/product-repository.test.mjs']);
+run('Python compile', python, ['-m', 'py_compile', 'science_agent/bridge.py', 'science_agent/daemon.py', 'science_agent/research_runtime.py']);
+run('Python unit tests', python, ['-m', 'unittest', 'discover', '-s', 'science_agent/tests', '-v']);
+run('Harness research profile', python, ['scripts/profile_check.py']);

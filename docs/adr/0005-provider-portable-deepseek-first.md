@@ -1,0 +1,3 @@
+# DeepSeek-first with a provider seam
+
+The default Model Provider is DeepSeek, but research workflows, prompts, tools, and persistence must not depend on DeepSeek-specific behavior. The application keeps an OpenAI-compatible provider seam and stores model identity in run metadata. This preserves zero-configuration DeepSeek use while allowing later provider changes without rewriting the domain model.

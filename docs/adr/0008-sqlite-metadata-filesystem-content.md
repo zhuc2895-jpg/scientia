@@ -1,0 +1,3 @@
+# SQLite metadata with filesystem content
+
+SCIENTIA uses a local SQLite database for controllable product state: Research Projects, Conversations, Source Records, Evidence Records, Research Runs, Checkpoints, Stage Artifacts, and Artifact indexes. Large research content remains in the bound Research Workspace, with the filesystem as the source of truth for source files, manuscripts, figures, PDFs, and logs. This supports durable recovery and audit queries without storing large binaries or generated documents in the database.
