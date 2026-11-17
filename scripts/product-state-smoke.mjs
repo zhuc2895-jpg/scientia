@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -154,7 +154,7 @@ async function stopApp({ graceful = true } = {}) {
   if (graceful && socket && child && child.exitCode === null) {
     try {
       await cdp('Runtime.evaluate', {
-        expression: 'window.scienceAgent.windowControl("close")',
+        expression: 'window.scienceAgent.quitApp()',
         awaitPromise: true,
         returnByValue: true,
       });
@@ -187,15 +187,38 @@ async function stopApp({ graceful = true } = {}) {
 
 try {
   cdp = await connect(await launchApp());
-  if (process.env.SCIENTIA_SMOKE_DEBUG) console.error('migration renderer connected');
   await waitForRenderer(cdp);
-  if (process.env.SCIENTIA_SMOKE_DEBUG) console.error('migration renderer ready');
+  await evaluate(cdp, 'window.scienceAgent.windowControl("close")');
+  await delay(300);
+  assert.equal(await evaluate(cdp, 'document.hidden'), true);
+  assert.equal(child.exitCode, null);
+  console.log('OK   Closing the window hides it without stopping the application');
+  await stopApp();
+
+  cdp = await connect(await launchApp());
+  await waitForRenderer(cdp);
+  const isolatedWorkspace = path.join(userData, 'research-workspace');
+  await evaluate(cdp, `(async () => {
+    const config = await window.scienceAgent.configLoad();
+    return window.scienceAgent.configSave({ ...config, workspace: ${JSON.stringify(isolatedWorkspace)}, apiKey: '' });
+  })()`);
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);
   const created = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
   assert.equal(created.conversations.length, 1);
   assert.equal(created.activeId, created.conversations[0].id);
   const expectedId = created.activeId;
+  const workspaceGuard = await evaluate(cdp, `(async () => {
+    const config = await window.scienceAgent.configLoad();
+    const rebound = await window.scienceAgent.configSave({ ...config, workspace: 'C:\\\\Research\\\\Other Project', apiKey: '' })
+      .then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message }));
+    return { initialWorkspace: config.workspace, project: (await window.scienceAgent.productStateLoad()).project, rebound };
+  })()`);
+  assert.equal(workspaceGuard.project.workspacePath, workspaceGuard.initialWorkspace);
+  assert.equal(workspaceGuard.rebound.ok, false);
+  assert.match(workspaceGuard.rebound.message, /已有会话/);
+  console.log('OK   Conversation ownership blocks silent workspace rebinding');
+  const workspace = workspaceGuard.initialWorkspace;
 
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);
@@ -221,6 +244,52 @@ try {
   assert.equal(restored.conversations.find((conversation) => conversation.id === expectedId).title, 'Durable evidence review');
   assert.equal(restored.conversations.find((conversation) => conversation.id === expectedId).messages[0].content, 'Persist this exact message.');
   console.log('OK   Product state survives an Electron restart');
+
+  const interruptedConversation = {
+    ...restored.conversations.find((conversation) => conversation.id === expectedId),
+    messages: [
+      ...restored.conversations.find((conversation) => conversation.id === expectedId).messages,
+      {
+        id: 'interrupted-assistant',
+        role: 'assistant',
+        content: 'Partial evidence summary',
+        status: 'running',
+        statusText: '正在研究',
+        runId: 'interrupted-run',
+        createdAt: '2026-11-17T00:16:00.000Z',
+      },
+    ],
+    activeRun: {
+      runId: 'interrupted-run',
+      assistantId: 'interrupted-assistant',
+      startedAt: '2026-11-17T00:16:00.000Z',
+      status: 'running',
+    },
+    updatedAt: '2026-11-17T00:16:00.000Z',
+  };
+  const recoveryRunDirectory = path.join(workspace, '.science', 'runs', expectedId, 'interrupted-run');
+  mkdirSync(recoveryRunDirectory, { recursive: true });
+  writeFileSync(path.join(recoveryRunDirectory, 'manifest.json'), JSON.stringify({
+    runId: 'interrupted-run',
+    conversationId: expectedId,
+    status: 'running',
+    startedAt: '2026-11-17T00:16:00.000Z',
+    lastStep: 'Extracting evidence',
+  }), 'utf8');
+  await evaluate(cdp, `window.scienceAgent.conversationUpdate(${JSON.stringify(interruptedConversation)})`);
+  await stopApp({ graceful: false });
+  cdp = await connect(await launchApp());
+  await waitForRenderer(cdp);
+  await waitForActiveConversation(cdp, expectedId);
+  const recoveredRunState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+  const recoveredConversation = recoveredRunState.conversations.find((conversation) => conversation.id === expectedId);
+  assert.equal(recoveredConversation.messages.find((message) => message.id === 'interrupted-assistant').status, 'needs-review');
+  assert.equal(recoveredConversation.activeRun.status, 'running');
+  assert.equal(recoveredConversation.activeRun.recoveryStatus, 'needs-review');
+  assert.equal(recoveredConversation.activeRun.runId, 'interrupted-run');
+  assert.equal(recoveredConversation.activeRun.manifest.lastStep, 'Extracting evidence');
+  assert.equal(recoveredConversation.activeRun.manifestPath, `.science/runs/${expectedId}/interrupted-run/manifest.json`);
+  console.log('OK   Interrupted runs recover as needs-review with their run association');
 
   await evaluate(cdp, `(() => {
     const select = document.querySelector('#research-mode');

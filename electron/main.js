@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, Tray } from 'electron';
 import { spawn } from 'node:child_process';
 
 import fs from 'node:fs/promises';
@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 import { createDaemonManager } from './runtime.js';
 import { openProductRepository } from './product-repository.js';
+import { createAppLifecycle } from './app-lifecycle.js';
+import { readRunManifest } from './run-recovery.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -18,6 +20,12 @@ let sessionApiKey = '';
 let cachedHarnessStatus = null;
 let runtimeManager = null;
 let productRepository = null;
+let tray = null;
+const appLifecycle = createAppLifecycle({
+  app,
+  getWindow: () => mainWindow,
+  stopRuntime: () => runtimeManager?.stop(),
+});
 
 function configPath() {
   return path.join(app.getPath('userData'), 'science-agent.json');
@@ -169,6 +177,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
   mainWindow.on('closed', () => { mainWindow = null; });
+  appLifecycle.attachWindow(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: 'deny' };
@@ -177,6 +186,25 @@ function createWindow() {
     if (url !== mainWindow?.webContents.getURL()) event.preventDefault();
   });
   mainWindow.loadFile(path.join(ROOT, 'app', 'index.html'));
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return;
+  tray = new Tray(path.join(ROOT, 'app', 'assets', 'icon.png'));
+  tray.setToolTip('SCIENTIA — Science Agent');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开 SCIENTIA', click: showMainWindow },
+    { type: 'separator' },
+    { label: '退出 SCIENTIA', click: () => appLifecycle.requestQuit() },
+  ]));
+  tray.on('click', showMainWindow);
 }
 
 function safeWorkspacePath(workspace, relativePath) {
@@ -355,7 +383,12 @@ function installIpc() {
   ipcMain.handle('conversation:set-active', (_event, id) => productRepository.setActiveConversation(id));
   ipcMain.on('product:flush', (event, payload) => {
     try {
-      if (payload?.conversation) productRepository.updateConversation(payload.conversation);
+      const conversations = Array.isArray(payload?.conversations)
+        ? payload.conversations
+        : payload?.conversation
+          ? [payload.conversation]
+          : [];
+      for (const conversation of conversations) productRepository.updateConversation(conversation);
       if (Object.hasOwn(payload || {}, 'activeId')) productRepository.setActiveConversation(payload.activeId);
       event.returnValue = { ok: true };
     } catch (error) {
@@ -368,7 +401,9 @@ function installIpc() {
   ipcMain.handle('config:save', async (_event, payload) => {
     const previous = await readConfigFile();
     if (typeof payload?.workspace !== 'string') throw new Error('请选择研究目录。');
-    const workspace = await ensureWorkspace(normalizeWorkspace(payload.workspace));
+    const requestedWorkspace = normalizeWorkspace(payload.workspace);
+    productRepository.validateWorkspaceBinding(requestedWorkspace);
+    const workspace = await ensureWorkspace(requestedWorkspace);
     const next = {
       ...previous,
       baseUrl: typeof payload.baseUrl === 'string' ? payload.baseUrl.trim().replace(/\/+$/, '') : '',
@@ -377,16 +412,24 @@ function installIpc() {
       workspace,
     };
     const apiKey = typeof payload.apiKey === 'string' ? payload.apiKey.trim() : '';
+    let nextSessionApiKey = sessionApiKey;
     if (apiKey) {
-      sessionApiKey = apiKey;
+      nextSessionApiKey = apiKey;
       next.apiKeyEncrypted = safeStorage.isEncryptionAvailable()
         ? safeStorage.encryptString(apiKey).toString('base64')
         : '';
     } else if (payload.clearApiKey === true) {
-      sessionApiKey = '';
+      nextSessionApiKey = '';
       next.apiKeyEncrypted = '';
     }
     await writeConfigFile(next);
+    try {
+      productRepository.rebindWorkspace(workspace);
+    } catch (error) {
+      await writeConfigFile(previous);
+      throw error;
+    }
+    sessionApiKey = nextSessionApiKey;
     cachedHarnessStatus = null;
     if (runtimeManager) await runtimeManager.restart();
     return publicConfig(next, await checkHarness());
@@ -421,6 +464,18 @@ function installIpc() {
   ipcMain.handle('files:import', async (_event, { workspace, paths }) => importFiles(workspace, paths));
   ipcMain.handle('agent:run', async (event, payload) => runAgent(payload, event.sender));
   ipcMain.handle('agent:cancel', async (_event, runId) => cancelAgent(runId));
+  ipcMain.handle('research:recover-run', async (_event, payload) => {
+    const workspace = normalizeWorkspace(payload?.workspace);
+    const projectWorkspace = productRepository.loadState().project?.workspacePath;
+    if (!projectWorkspace || path.resolve(workspace).toLowerCase() !== path.resolve(projectWorkspace).toLowerCase()) {
+      throw new Error('只能从当前 Research Project 的工作区恢复运行。');
+    }
+    return readRunManifest({
+      workspace,
+      conversationId: payload?.conversationId,
+      runId: payload?.runId,
+    });
+  });
   ipcMain.handle('app:runtime', async () => ({
     platform: process.platform,
     version: app.getVersion(),
@@ -429,6 +484,10 @@ function installIpc() {
     dshHome: path.join(app.getPath('userData'), 'dsh-home'),
   }));
   ipcMain.handle('app:open-data', async () => shell.openPath(app.getPath('userData')));
+  ipcMain.handle('app:quit', () => {
+    appLifecycle.requestQuit();
+    return true;
+  });
   ipcMain.handle('external:open', async (_event, url) => {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
     await shell.openExternal(url);
@@ -462,6 +521,7 @@ if (!singleInstance) {
     const config = await readConfigFile();
     sessionApiKey = await hydrateSecret(config);
     productRepository = openProductRepository({ databasePath: productDatabasePath() });
+    productRepository.ensureProject({ workspacePath: config.workspace || defaultWorkspace() });
     await ensureWorkspace(config.workspace || defaultWorkspace());
     runtimeManager = createDaemonManager({
       app,
@@ -474,9 +534,11 @@ if (!singleInstance) {
     });
     installIpc();
     createWindow();
+    createTray();
     void runtimeManager.start().catch((error) => console.error('[science-agent] daemon start failed:', error));
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) showMainWindow();
+      else createWindow();
     });
   }).catch((error) => {
     console.error('[science-agent] startup failed:', error);
@@ -484,15 +546,11 @@ if (!singleInstance) {
     app.quit();
   });
 
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
-
-  app.on('before-quit', () => {
-    void runtimeManager?.stop();
-  });
+  app.on('before-quit', appLifecycle.handleBeforeQuit);
 
   app.on('will-quit', () => {
+    tray?.destroy();
+    tray = null;
     productRepository?.close();
     productRepository = null;
   });

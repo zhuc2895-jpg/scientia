@@ -1,3 +1,5 @@
+import { conversationSnapshot, reconcileRunManifest, recoverInterruptedRuns, tryNormalizeConversation } from './conversation-state.js';
+
 const bridge = window.scienceAgent ?? createPreviewBridge();
 const isPreview = !window.scienceAgent;
 
@@ -6,6 +8,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const LEGACY_CONVERSATION_KEY = 'scientia.conversations.v1';
 const UI_KEY = 'scientia.ui.v1';
 const conversationWrites = new Map();
+const dirtyConversations = new Map();
 
 const state = {
   config: null,
@@ -94,29 +97,13 @@ function icon(name, className = '') {
   return `<svg${className ? ` class="${className}"` : ''} aria-hidden="true"><use href="#i-${name}"></use></svg>`;
 }
 
-function normalizeConversationRecord(item) {
-  if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id) return null;
-  return {
-    id: item.id,
-    title: typeof item.title === 'string' && item.title ? item.title : '新的研究',
-    createdAt: item.createdAt || nowISO(),
-    updatedAt: item.updatedAt || item.createdAt || nowISO(),
-    messages: Array.isArray(item.messages)
-      ? item.messages.map((message) => ({ ...message, status: message.status === 'running' ? 'cancelled' : message.status }))
-      : [],
-    activities: Array.isArray(item.activities) ? item.activities : [],
-    evidenceMode: item.evidenceMode !== false,
-    researchMode: typeof item.researchMode === 'string' ? item.researchMode : 'auto',
-  };
-}
-
 function readLegacyProductState() {
   const raw = localStorage.getItem(LEGACY_CONVERSATION_KEY);
   if (!raw) return { conversations: [], activeId: null, readable: true };
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return { conversations: [], activeId: null, readable: false };
-    const conversations = parsed.map(normalizeConversationRecord);
+    const conversations = parsed.map(tryNormalizeConversation);
     if (conversations.some((conversation) => conversation === null)) {
       return { conversations: [], activeId: null, readable: false };
     }
@@ -145,24 +132,18 @@ async function initializeProductState() {
   return productState;
 }
 
-function conversationSnapshot(conversation) {
-  return {
-    ...conversation,
-    messages: conversation.messages.map((message) => ({
-      ...message,
-      status: message.status === 'running' ? 'cancelled' : message.status,
-    })),
-  };
-}
-
 function persistConversation(conversation) {
   if (!conversation?.id) return Promise.resolve();
   const snapshot = conversationSnapshot(conversation);
   const previous = conversationWrites.get(conversation.id) || Promise.resolve();
   const next = previous
     .catch(() => {})
-    .then(() => bridge.conversationUpdate(snapshot))
+    .then(async () => {
+      await bridge.conversationUpdate(snapshot);
+      if (dirtyConversations.get(conversation.id) === snapshot) dirtyConversations.delete(conversation.id);
+    })
     .catch((error) => showToast(error.message || '无法保存研究会话。'));
+  dirtyConversations.set(conversation.id, snapshot);
   conversationWrites.set(conversation.id, next);
   void next.finally(() => {
     if (conversationWrites.get(conversation.id) === next) conversationWrites.delete(conversation.id);
@@ -172,14 +153,20 @@ function persistConversation(conversation) {
 
 function flushProductState(event) {
   const conversation = activeConversation();
+  const conversations = [...dirtyConversations.values()];
+  if (conversation && !conversations.some((item) => item.id === conversation.id)) {
+    conversations.push(conversationSnapshot(conversation));
+  }
   try {
     const result = bridge.flushProductState({
-      conversation: conversation ? conversationSnapshot(conversation) : null,
+      conversations,
       activeId: state.activeId,
     });
     if (result?.ok === false) {
       event.preventDefault();
       event.returnValue = result.error || '无法保存当前会话。';
+    } else {
+      dirtyConversations.clear();
     }
   } catch (error) {
     event.preventDefault();
@@ -468,6 +455,9 @@ function emptyAssistantMarkup(message) {
   if (message.status === 'cancelled') {
     return `<div class="message-cancelled">${escapeHTML(message.content || '研究任务已停止。')}</div>`;
   }
+  if (message.status === 'needs-review') {
+    return `<div class="message-needs-review"><strong>运行已中断，需要复核</strong><span>${escapeHTML(message.statusText || '应用重启前的研究运行尚未完成。')}</span></div>${message.content ? `<div class="markdown">${renderMarkdown(message.content)}</div>` : ''}`;
+  }
   return `<div class="markdown">${renderMarkdown(message.content || '任务已完成，但没有返回文本。')}</div>${artifactMarkup(message)}`;
 }
 
@@ -495,7 +485,7 @@ function renderMessages() {
         </article>
       `;
     }
-    const statusText = message.status === 'running' ? message.statusText : '';
+    const statusText = ['running', 'needs-review'].includes(message.status) ? message.statusText : '';
     return `
       <article class="message message-agent">
         <div class="agent-message-avatar">S</div>
@@ -752,6 +742,7 @@ function completeRun(event) {
     message.quality = event.quality || null;
     message.researchRun = event.run || null;
     conversation.lastResearchRun = event.run || null;
+    if (conversation.activeRun?.runId === run.runId) conversation.activeRun = null;
     conversation.updatedAt = nowISO();
     conversation.activities = conversation.activities.map((activity) => ({ ...activity, status: 'done' }));
     conversation.activities.push({ id: uid(), label: '研究结果已返回', status: 'done', time: nowISO() });
@@ -772,6 +763,7 @@ function failRun(event) {
   if (conversation && message) {
     message.status = 'error';
     message.error = event.message || '研究任务未完成。';
+    if (conversation.activeRun?.runId === run.runId) conversation.activeRun = null;
     conversation.updatedAt = nowISO();
     conversation.activities = conversation.activities.map((activity) => ({ ...activity, status: activity.status === 'active' ? 'done' : activity.status }));
     conversation.activities.push({ id: uid(), label: '任务未完成，等待排查', status: 'done', time: nowISO() });
@@ -831,6 +823,7 @@ function handleAgentEvent(event) {
     if (conversation && message) {
       message.status = 'cancelled';
       message.content = event.message || '研究任务已停止。';
+      if (conversation.activeRun?.runId === run.runId) conversation.activeRun = null;
       conversation.activities = conversation.activities.map((activity) => ({ ...activity, status: 'done' }));
       conversation.activities.push({ id: uid(), label: '用户停止了研究任务', status: 'done', time: nowISO() });
     }
@@ -874,7 +867,7 @@ async function sendResearchTask() {
     id: uid(), role: 'user', content: userContent, attachments, createdAt,
   });
   conversation.messages.push({
-    id: assistantId, role: 'assistant', content: '', status: 'running', statusText: '正在装载研究上下文', createdAt,
+    id: assistantId, role: 'assistant', content: '', status: 'running', statusText: '正在装载研究上下文', runId, createdAt,
   });
   conversation.updatedAt = createdAt;
   conversation.evidenceMode = state.evidenceMode;
@@ -883,12 +876,19 @@ async function sendResearchTask() {
     { id: uid(), label: '研究任务已提交', status: 'done', time: createdAt },
     { id: uid(), label: '正在启动 DeepSeek Harness', status: 'active', time: createdAt },
   );
+  conversation.activeRun = {
+    runId,
+    assistantId,
+    startedAt: createdAt,
+    status: 'running',
+  };
 
   state.activeRun = {
     runId,
     assistantId,
     conversationId: conversation.id,
     startedAt: Date.now(),
+    status: 'running',
   };
   state.pendingAttachments = [];
   els.prompt.value = '';
@@ -923,6 +923,7 @@ async function stopResearchTask() {
     message.content = '研究任务已由用户停止。';
   }
   if (conversation) {
+    if (conversation.activeRun?.runId === run.runId) conversation.activeRun = null;
     conversation.activities = conversation.activities.map((activity) => ({ ...activity, status: 'done' }));
     conversation.activities.push({ id: uid(), label: '用户停止了研究任务', status: 'done', time: nowISO() });
   }
@@ -1255,8 +1256,29 @@ async function init() {
 
   try {
     const productState = await initializeProductState();
-    state.conversations = Array.isArray(productState.conversations) ? productState.conversations : [];
+    const recovered = recoverInterruptedRuns(Array.isArray(productState.conversations) ? productState.conversations : []);
+    state.conversations = recovered.conversations;
     state.activeId = productState.activeId || null;
+    for (const conversationId of recovered.conversationIds) {
+      let conversation = state.conversations.find((item) => item.id === conversationId);
+      if (!conversation) continue;
+      if (conversation.activeRun?.runId && state.config?.workspace) {
+        try {
+          const recovery = await bridge.recoverRun({
+            workspace: state.config.workspace,
+            conversationId: conversation.id,
+            runId: conversation.activeRun.runId,
+          });
+          if (recovery) {
+            conversation = reconcileRunManifest(conversation, recovery);
+            state.conversations = state.conversations.map((item) => item.id === conversation.id ? conversation : item);
+          }
+        } catch (error) {
+          conversation.activeRun.manifestError = error.message || '无法读取 Run Manifest。';
+        }
+      }
+      await persistConversation(conversation);
+    }
   } catch (error) {
     showToast(error.message || '无法读取本地会话。', 5000);
   }
@@ -1396,8 +1418,10 @@ function createPreviewBridge() {
       listener?.({ type: 'cancelled', runId });
       return { cancelled: true };
     },
+    async recoverRun() { return null; },
     onAgentEvent(callback) { listener = callback; return () => { listener = null; }; },
     async runtime() { return { platform: 'win32', version: 'preview', electron: 'preview', workspaceDefault: previewWorkspace, dshHome: 'preview' }; },
+    async quitApp() { return true; },
     async openData() { return ''; },
     async openExternal(url) { window.open(url, '_blank', 'noopener'); return true; },
     async windowControl() { return false; },

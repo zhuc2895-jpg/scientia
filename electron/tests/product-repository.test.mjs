@@ -11,6 +11,12 @@ function temporaryDatabase() {
   return { directory, databasePath: path.join(directory, 'product.sqlite3') };
 }
 
+function openTestRepository(databasePath) {
+  const repository = openProductRepository({ databasePath });
+  repository.ensureProject({ workspacePath: 'C:/Research/Test Project' });
+  return repository;
+}
+
 function conversation(overrides = {}) {
   return {
     id: 'conversation-1',
@@ -31,12 +37,12 @@ test('conversations and active selection survive repository restart', (t) => {
   const { directory, databasePath } = temporaryDatabase();
   const original = conversation();
 
-  const first = openProductRepository({ databasePath });
+  const first = openTestRepository(databasePath);
   first.createConversation(original);
   first.setActiveConversation(original.id);
   first.close();
 
-  const reopened = openProductRepository({ databasePath });
+  const reopened = openTestRepository(databasePath);
   t.after(() => {
     reopened.close();
     rmSync(directory, { recursive: true, force: true });
@@ -57,7 +63,7 @@ test('conversation updates and deletes are durable and keep a valid active selec
     updatedAt: '2026-11-17T00:06:00.000Z',
   });
 
-  let repository = openProductRepository({ databasePath });
+  let repository = openTestRepository(databasePath);
   t.after(() => {
     repository.close();
     rmSync(directory, { recursive: true, force: true });
@@ -74,7 +80,7 @@ test('conversation updates and deletes are durable and keep a valid active selec
   repository.deleteConversation(secondConversation.id);
   repository.close();
 
-  repository = openProductRepository({ databasePath });
+  repository = openTestRepository(databasePath);
   const state = repository.loadState();
   assert.equal(state.activeId, firstConversation.id);
   assert.equal(state.conversations.length, 1);
@@ -91,7 +97,7 @@ test('legacy browser conversations migrate once without duplication and keep the
     updatedAt: '2026-11-17T00:06:00.000Z',
   });
 
-  const repository = openProductRepository({ databasePath });
+  const repository = openTestRepository(databasePath);
   t.after(() => {
     repository.close();
     rmSync(directory, { recursive: true, force: true });
@@ -116,7 +122,7 @@ test('conflicting duplicate IDs in legacy data are rejected instead of silently 
   const { directory, databasePath } = temporaryDatabase();
   const original = conversation();
   const conflicting = conversation({ title: 'Conflicting legacy version', updatedAt: '2026-11-17T00:20:00.000Z' });
-  const repository = openProductRepository({ databasePath });
+  const repository = openTestRepository(databasePath);
   t.after(() => {
     repository.close();
     rmSync(directory, { recursive: true, force: true });
@@ -136,7 +142,7 @@ test('legacy migration rejects a conflicting version of an existing repository c
   const { directory, databasePath } = temporaryDatabase();
   const repositoryConversation = conversation({ title: 'Repository version' });
   const legacyConversation = conversation({ title: 'Legacy version' });
-  const repository = openProductRepository({ databasePath });
+  const repository = openTestRepository(databasePath);
   t.after(() => {
     repository.close();
     rmSync(directory, { recursive: true, force: true });
@@ -151,4 +157,45 @@ test('legacy migration rejects a conflicting version of an existing repository c
   const state = repository.loadState();
   assert.equal(state.migrationComplete, false);
   assert.equal(state.conversations[0].title, 'Repository version');
+});
+
+test('conversations stay bound to their project workspace', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const project = repository.ensureProject({ workspacePath: 'C:/Research/Project-A' });
+  repository.createConversation(conversation());
+
+  assert.equal(project.workspacePath, 'C:/Research/Project-A');
+  assert.throws(() => repository.rebindWorkspace('C:/Research/Project-B'), /已有会话/);
+  assert.equal(repository.loadState().project.workspacePath, 'C:/Research/Project-A');
+});
+
+test('an empty project can be rebound to a different workspace', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.ensureProject({ workspacePath: 'C:/Research/Project-A' });
+  repository.rebindWorkspace('C:/Research/Project-B');
+
+  assert.equal(repository.loadState().project.workspacePath, 'C:/Research/Project-B');
+});
+
+test('conversations require a workspace-bound project', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openProductRepository({ databasePath });
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  assert.throws(() => repository.createConversation(conversation()), /尚未绑定研究工作区/);
 });

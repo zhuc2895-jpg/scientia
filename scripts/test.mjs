@@ -16,10 +16,16 @@ function run(label, command, args) {
   console.log(`OK   ${label}`);
 }
 
-for (const file of ['app/app.js', 'electron/main.js', 'electron/product-repository.js', 'electron/runtime.js', 'electron/preload.cjs']) {
+for (const file of ['app/app.js', 'app/conversation-state.js', 'electron/app-lifecycle.js', 'electron/main.js', 'electron/product-repository.js', 'electron/run-recovery.js', 'electron/runtime.js', 'electron/preload.cjs']) {
   run(`syntax ${file}`, process.execPath, ['--check', file]);
 }
-run('Product repository tests', process.execPath, ['--test', 'electron/tests/product-repository.test.mjs']);
+run('Application state tests', process.execPath, [
+  '--test',
+  'electron/tests/app-lifecycle.test.mjs',
+  'electron/tests/conversation-state.test.mjs',
+  'electron/tests/product-repository.test.mjs',
+  'electron/tests/run-recovery.test.mjs',
+]);
 run('Python compile', python, ['-m', 'py_compile', 'science_agent/bridge.py', 'science_agent/daemon.py', 'science_agent/research_runtime.py']);
 run('Python unit tests', python, ['-m', 'unittest', 'discover', '-s', 'science_agent/tests', '-v']);
 run('Harness research profile', python, ['scripts/profile_check.py']);

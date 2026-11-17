@@ -2,28 +2,11 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import { normalizeConversation } from '../app/conversation-state.js';
+
 const ACTIVE_CONVERSATION_KEY = 'active_conversation_id';
 const CONVERSATION_MIGRATION_KEY = 'conversation_local_storage_v1';
-
-function normalizeConversation(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('会话数据无效。');
-  }
-  if (typeof value.id !== 'string' || !value.id.trim() || value.id.length > 200) {
-    throw new Error('会话 ID 无效。');
-  }
-  return {
-    ...value,
-    id: value.id,
-    title: typeof value.title === 'string' && value.title.trim() ? value.title : '新的研究',
-    createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
-    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
-    messages: Array.isArray(value.messages) ? value.messages : [],
-    activities: Array.isArray(value.activities) ? value.activities : [],
-    evidenceMode: value.evidenceMode !== false,
-    researchMode: typeof value.researchMode === 'string' ? value.researchMode : 'auto',
-  };
-}
+const DEFAULT_PROJECT_ID = 'scientia-default-project';
 
 function deserializeConversation(row) {
   const parsed = JSON.parse(row.payload_json);
@@ -37,16 +20,27 @@ export function openProductRepository({ databasePath }) {
 
   mkdirSync(path.dirname(databasePath), { recursive: true });
   const database = new DatabaseSync(databasePath);
+  const now = new Date().toISOString();
   database.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
 
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      workspace_path TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT_ID}',
       title TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL
+      payload_json TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id)
     );
 
     CREATE TABLE IF NOT EXISTS app_state (
@@ -54,25 +48,40 @@ export function openProductRepository({ databasePath }) {
       value TEXT
     );
   `);
+  const conversationColumns = database.prepare('PRAGMA table_info(conversations)').all();
+  if (!conversationColumns.some((column) => column.name === 'project_id')) {
+    database.exec(`ALTER TABLE conversations ADD COLUMN project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT_ID}'`);
+  }
+  database.prepare(`
+    INSERT OR IGNORE INTO projects (id, name, workspace_path, created_at, updated_at)
+    VALUES (?, ?, NULL, ?, ?)
+  `).run(DEFAULT_PROJECT_ID, 'Research Project', now, now);
 
   const insertConversation = database.prepare(`
-    INSERT INTO conversations (id, title, created_at, updated_at, payload_json)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO conversations (id, project_id, title, created_at, updated_at, payload_json)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
   const insertConversationIfAbsent = database.prepare(`
-    INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at, payload_json)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO conversations (id, project_id, title, created_at, updated_at, payload_json)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
   const updateConversation = database.prepare(`
     UPDATE conversations
     SET title = ?, created_at = ?, updated_at = ?, payload_json = ?
-    WHERE id = ?
+    WHERE id = ? AND project_id = ?
   `);
-  const deleteConversation = database.prepare('DELETE FROM conversations WHERE id = ?');
+  const deleteConversation = database.prepare('DELETE FROM conversations WHERE id = ? AND project_id = ?');
   const selectConversations = database.prepare(`
-    SELECT id, payload_json FROM conversations ORDER BY updated_at DESC, id ASC
+    SELECT id, payload_json FROM conversations WHERE project_id = ? ORDER BY updated_at DESC, id ASC
   `);
-  const selectConversationById = database.prepare('SELECT payload_json FROM conversations WHERE id = ?');
+  const selectConversationById = database.prepare('SELECT payload_json FROM conversations WHERE id = ? AND project_id = ?');
+  const countProjectConversations = database.prepare('SELECT COUNT(*) AS count FROM conversations WHERE project_id = ?');
+  const selectProject = database.prepare(`
+    SELECT id, name, workspace_path, created_at, updated_at FROM projects WHERE id = ?
+  `);
+  const updateProjectWorkspace = database.prepare(`
+    UPDATE projects SET workspace_path = ?, updated_at = ? WHERE id = ?
+  `);
   const selectActiveConversation = database.prepare('SELECT value FROM app_state WHERE key = ?');
   const setAppState = database.prepare(`
     INSERT INTO app_state (key, value) VALUES (?, ?)
@@ -85,9 +94,59 @@ export function openProductRepository({ databasePath }) {
     if (closed) throw new Error('产品数据库已关闭。');
   }
 
+  function serializeProject(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      workspacePath: row.workspace_path || '',
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  function workspaceKey(value) {
+    const resolved = path.resolve(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  }
+
+  function validateWorkspaceBinding(workspacePath) {
+    assertOpen();
+    if (typeof workspacePath !== 'string' || !workspacePath.trim()) throw new Error('Research Project 必须绑定研究工作区。');
+    const nextWorkspacePath = workspacePath.trim();
+    const row = selectProject.get(DEFAULT_PROJECT_ID);
+    if (!row) throw new Error('默认 Research Project 不存在。');
+
+    if (row.workspace_path && workspaceKey(row.workspace_path) !== workspaceKey(nextWorkspacePath)) {
+      const { count } = countProjectConversations.get(DEFAULT_PROJECT_ID);
+      if (count > 0) throw new Error('当前 Research Project 已有会话，不能直接更换研究工作区。');
+    }
+    return serializeProject(row);
+  }
+
+  function assertProjectBound() {
+    const row = selectProject.get(DEFAULT_PROJECT_ID);
+    if (!row?.workspace_path) throw new Error('Research Project 尚未绑定研究工作区。');
+    return row;
+  }
+
+  function ensureProject({ workspacePath, name } = {}) {
+    assertOpen();
+    const row = validateWorkspaceBinding(workspacePath);
+    const nextWorkspacePath = workspacePath.trim();
+    if (!row.workspace_path || workspaceKey(row.workspace_path) !== workspaceKey(nextWorkspacePath)) {
+      updateProjectWorkspace.run(nextWorkspacePath, new Date().toISOString(), DEFAULT_PROJECT_ID);
+    }
+    if (typeof name === 'string' && name.trim() && name.trim() !== row.name) {
+      database.prepare('UPDATE projects SET name = ?, updated_at = ? WHERE id = ?')
+        .run(name.trim(), new Date().toISOString(), DEFAULT_PROJECT_ID);
+    }
+    return serializeProject(selectProject.get(DEFAULT_PROJECT_ID));
+  }
+
   function loadState() {
     assertOpen();
-    const conversations = selectConversations.all().map(deserializeConversation);
+    const conversations = selectConversations.all(DEFAULT_PROJECT_ID).map(deserializeConversation);
     const activeRow = selectActiveConversation.get(ACTIVE_CONVERSATION_KEY);
     const requestedActiveId = typeof activeRow?.value === 'string' ? activeRow.value : null;
     const activeId = conversations.some((item) => item.id === requestedActiveId)
@@ -95,14 +154,16 @@ export function openProductRepository({ databasePath }) {
       : conversations[0]?.id || null;
     if (activeId !== requestedActiveId) setAppState.run(ACTIVE_CONVERSATION_KEY, activeId);
     const migrationComplete = selectActiveConversation.get(CONVERSATION_MIGRATION_KEY)?.value === '1';
-    return { conversations, activeId, migrationComplete };
+    return { conversations, activeId, migrationComplete, project: serializeProject(selectProject.get(DEFAULT_PROJECT_ID)) };
   }
 
   function createConversation(value) {
     assertOpen();
+    assertProjectBound();
     const conversation = normalizeConversation(value);
     insertConversation.run(
       conversation.id,
+      DEFAULT_PROJECT_ID,
       conversation.title,
       conversation.createdAt,
       conversation.updatedAt,
@@ -120,6 +181,7 @@ export function openProductRepository({ databasePath }) {
       conversation.updatedAt,
       JSON.stringify(conversation),
       conversation.id,
+      DEFAULT_PROJECT_ID,
     );
     if (result.changes !== 1) throw new Error('无法更新不存在的会话。');
     return conversation;
@@ -128,10 +190,10 @@ export function openProductRepository({ databasePath }) {
   function deleteConversationRecord(id) {
     assertOpen();
     const activeRow = selectActiveConversation.get(ACTIVE_CONVERSATION_KEY);
-    const result = deleteConversation.run(id);
+    const result = deleteConversation.run(id, DEFAULT_PROJECT_ID);
     if (result.changes !== 1) throw new Error('无法删除不存在的会话。');
     if (activeRow?.value === id) {
-      const next = selectConversations.all()[0]?.id || null;
+      const next = selectConversations.all(DEFAULT_PROJECT_ID)[0]?.id || null;
       setAppState.run(ACTIVE_CONVERSATION_KEY, next);
       return next;
     }
@@ -140,6 +202,7 @@ export function openProductRepository({ databasePath }) {
 
   function migrateLegacyState({ conversations, activeId }) {
     assertOpen();
+    assertProjectBound();
     if (selectActiveConversation.get(CONVERSATION_MIGRATION_KEY)?.value === '1') {
       return { ...loadState(), migrated: false };
     }
@@ -158,25 +221,26 @@ export function openProductRepository({ databasePath }) {
     database.exec('BEGIN IMMEDIATE');
     try {
       for (const conversation of uniqueConversations) {
-        const existing = selectConversationById.get(conversation.id);
+        const existing = selectConversationById.get(conversation.id, DEFAULT_PROJECT_ID);
         if (existing && JSON.stringify(deserializeConversation(existing)) !== JSON.stringify(conversation)) {
           throw new Error(`旧会话与本地数据库中的同名 ID 冲突：${conversation.id}`);
         }
         insertConversationIfAbsent.run(
           conversation.id,
+          DEFAULT_PROJECT_ID,
           conversation.title,
           conversation.createdAt,
           conversation.updatedAt,
           JSON.stringify(conversation),
         );
       }
-      const knownIds = new Set(selectConversations.all().map((row) => row.id));
+      const knownIds = new Set(selectConversations.all(DEFAULT_PROJECT_ID).map((row) => row.id));
       const existingActiveId = selectActiveConversation.get(ACTIVE_CONVERSATION_KEY)?.value || null;
       const nextActiveId = knownIds.has(activeId)
         ? activeId
         : knownIds.has(existingActiveId)
           ? existingActiveId
-          : selectConversations.all()[0]?.id || null;
+          : selectConversations.all(DEFAULT_PROJECT_ID)[0]?.id || null;
       setAppState.run(ACTIVE_CONVERSATION_KEY, nextActiveId);
       setAppState.run(CONVERSATION_MIGRATION_KEY, '1');
       database.exec('COMMIT');
@@ -190,7 +254,7 @@ export function openProductRepository({ databasePath }) {
 
   function setActiveConversation(id) {
     assertOpen();
-    if (id !== null && !selectConversations.all().some((row) => row.id === id)) {
+    if (id !== null && !selectConversations.all(DEFAULT_PROJECT_ID).some((row) => row.id === id)) {
       throw new Error('无法选择不存在的会话。');
     }
     setAppState.run(ACTIVE_CONVERSATION_KEY, id);
@@ -205,6 +269,9 @@ export function openProductRepository({ databasePath }) {
 
   return {
     loadState,
+    ensureProject,
+    validateWorkspaceBinding,
+    rebindWorkspace: (workspacePath) => ensureProject({ workspacePath }),
     createConversation,
     updateConversation: updateConversationRecord,
     deleteConversation: deleteConversationRecord,

@@ -230,6 +230,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .thinking-dots span:nth-child(3) { animation-delay: .32s; }
 .message-error { border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--line)); background: var(--coral-soft); color: var(--danger); border-radius: 12px; padding: 12px 14px; font-size: 12px; line-height: 1.6; }
 .message-cancelled { color: var(--muted); font-size: 12px; padding: 8px 0; }
+.message-needs-review { display: grid; gap: 4px; border: 1px solid color-mix(in srgb, var(--brass) 28%, var(--line)); background: color-mix(in srgb, var(--brass) 8%, transparent); border-radius: 12px; padding: 12px 14px; color: var(--ink); font-size: 12px; line-height: 1.6; }
+.message-needs-review strong { color: var(--brass); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
 
 .markdown { color: var(--ink-soft); font-size: 13.5px; line-height: 1.78; overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
