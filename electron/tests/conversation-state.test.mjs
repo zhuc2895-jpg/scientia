@@ -50,6 +50,23 @@ test('restart recovery marks a running message needs-review and preserves its ru
   assert.equal(conversation.messages[1].status, 'running');
 });
 
+test('run recovery is idempotent after the first review marker is persisted', () => {
+  const conversation = {
+    id: 'conversation-idempotent',
+    title: 'Recovered once',
+    messages: [{ id: 'assistant-idempotent', role: 'assistant', status: 'running', runId: 'run-idempotent' }],
+    activeRun: { runId: 'run-idempotent', assistantId: 'assistant-idempotent', status: 'running' },
+    activities: [],
+  };
+
+  const first = recoverInterruptedRuns([conversation], { recoveredAt: '2026-11-17T00:20:00.000Z' });
+  const second = recoverInterruptedRuns(first.conversations, { recoveredAt: '2026-11-17T00:30:00.000Z' });
+
+  assert.equal(first.changed, true);
+  assert.equal(second.changed, false);
+  assert.equal(second.conversations[0].activities.length, 1);
+});
+
 test('conversation snapshots preserve an in-flight run instead of downgrading it', () => {
   const conversation = {
     id: 'conversation-2',

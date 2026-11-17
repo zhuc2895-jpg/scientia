@@ -38,7 +38,7 @@ export function recoverInterruptedRuns(conversations, { recoveredAt = new Date()
   const recoveredConversations = (Array.isArray(conversations) ? conversations : []).map((conversation) => {
     const recovered = normalizeConversation(conversation);
     const runningMessages = recovered.messages.filter((message) => message.status === 'running');
-    const activeRunIsRunning = recovered.activeRun?.status === 'running';
+    const activeRunIsRunning = recovered.activeRun?.status === 'running' && recovered.activeRun?.recoveryStatus !== 'needs-review';
     if (!runningMessages.length && !activeRunIsRunning) return recovered;
 
     conversationIds.push(recovered.id);
