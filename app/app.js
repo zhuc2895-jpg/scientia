@@ -978,21 +978,30 @@ async function attachResearchFiles() {
     return;
   }
   try {
-    const paths = await bridge.pickFiles();
-    if (paths.length) await importDroppedPaths(paths);
+    const tokens = await bridge.pickFiles();
+    if (tokens.length) await importAuthorizedFiles(tokens);
   } catch (error) {
     showToast(error.message || '无法导入文件。');
   }
 }
 
-async function importDroppedPaths(paths) {
-  if (!paths.length) return;
+async function importDroppedFiles(files) {
+  try {
+    const tokens = await bridge.authorizeDroppedFiles(files);
+    await importAuthorizedFiles(tokens);
+  } catch (error) {
+    showToast(error.message || '无法导入文件。');
+  }
+}
+
+async function importAuthorizedFiles(tokens) {
+  if (!tokens.length) return;
   if (!state.config?.workspace) {
     openSettings();
     return;
   }
   try {
-    const imported = await bridge.importFiles(paths);
+    const imported = await bridge.importFiles(tokens);
     state.pendingAttachments.push(...imported);
     renderPendingAttachments();
     void refreshWorkspace();
@@ -1278,10 +1287,7 @@ function bindEvents() {
   els.composer.addEventListener('drop', (event) => {
     event.preventDefault();
     els.composer.classList.remove('dragover');
-    const paths = [...event.dataTransfer.files].map((file) => {
-      try { return bridge.getPathForFile(file); } catch { return ''; }
-    }).filter(Boolean);
-    void importDroppedPaths(paths);
+    void importDroppedFiles([...event.dataTransfer.files]);
   });
 
   document.addEventListener('keydown', (event) => {
@@ -1434,10 +1440,10 @@ function createPreviewBridge() {
     async openPath() { return ''; },
     async revealPath() { return ''; },
     async pickFiles() { return []; },
-    async importFiles(paths) {
-      return paths.map((filePath, index) => ({ name: basename(filePath), relativePath: `.science/inputs/demo/${index + 1}-${basename(filePath)}`, size: 1024 }));
+    async authorizeDroppedFiles() { return []; },
+    async importFiles(tokens) {
+      return tokens.map((_token, index) => ({ name: `file-${index + 1}`, relativePath: `.science/inputs/demo/${index + 1}-file`, size: 1024 }));
     },
-    getPathForFile(file) { return file?.name || ''; },
     async runAgent(payload) {
       const response = `## 当前版本的研究界面
 

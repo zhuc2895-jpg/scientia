@@ -40,7 +40,8 @@ export function recoverInterruptedRuns(conversations, { recoveredAt = new Date()
     const recovered = normalizeConversation(conversation);
     const runningMessages = recovered.messages.filter((message) => message.status === 'running');
     const activeRunIsRunning = recovered.activeRun?.status === 'running' && recovered.activeRun?.recoveryStatus !== 'needs-review';
-    if (recovered.activeRun?.runId && (runningMessages.length || activeRunIsRunning || recovered.activeRun.recoveryStatus === 'needs-review')) {
+    const runId = recovered.activeRun?.runId || runningMessages[0]?.runId;
+    if (runId && (runningMessages.length || activeRunIsRunning || recovered.activeRun?.recoveryStatus === 'needs-review')) {
       manifestReviewIds.push(recovered.id);
     }
     if (!runningMessages.length && !activeRunIsRunning) return recovered;

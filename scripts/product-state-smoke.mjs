@@ -235,6 +235,15 @@ try {
   const inspectedWorkspace = await evaluate(cdp, `window.scienceAgent.inspectWorkspace('C:\\\\Windows')`);
   assert.equal(inspectedWorkspace.workspace, workspace);
   console.log('OK   Filesystem access ignores renderer-supplied workspace roots');
+  const importGuard = await evaluate(cdp, `(async () => ({
+    hasRawPathApi: typeof window.scienceAgent.getPathForFile === 'function',
+    forged: await window.scienceAgent.importFiles(['forged-token'])
+      .then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message })),
+  }))()`);
+  assert.equal(importGuard.hasRawPathApi, false);
+  assert.equal(importGuard.forged.ok, false);
+  assert.match(importGuard.forged.message, /导入授权无效或已过期/);
+  console.log('OK   File imports require main-process authorization tokens');
 
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);

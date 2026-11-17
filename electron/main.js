@@ -12,6 +12,8 @@ import { openProductRepository } from './product-repository.js';
 import { createAppLifecycle } from './app-lifecycle.js';
 import { readRunManifest } from './run-recovery.js';
 import { captureSecretFromUser } from './native-secret-input.js';
+import { createImportAuthorizer } from './import-authorizer.js';
+import { resolveWorkspaceEntry } from './workspace-paths.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -22,6 +24,7 @@ let cachedHarnessStatus = null;
 let runtimeManager = null;
 let productRepository = null;
 let tray = null;
+const importAuthorizer = createImportAuthorizer();
 const appLifecycle = createAppLifecycle({
   app,
   getWindow: () => mainWindow,
@@ -229,16 +232,6 @@ function createTray() {
   tray.on('click', showMainWindow);
 }
 
-function safeWorkspacePath(workspace, relativePath) {
-  if (typeof relativePath !== 'string' || !relativePath) throw new Error('文件路径无效。');
-  const resolved = path.resolve(workspace, relativePath);
-  const prefix = path.resolve(workspace) + path.sep;
-  if (resolved !== path.resolve(workspace) && !resolved.startsWith(prefix)) {
-    throw new Error('文件不在当前研究目录中。');
-  }
-  return resolved;
-}
-
 function classifyExtension(ext) {
   if (['.pdf', '.doc', '.docx', '.md', '.txt', '.tex', '.rtf'].includes(ext)) return 'documents';
   if (['.csv', '.tsv', '.xlsx', '.xls', '.json', '.jsonl', '.parquet', '.h5', '.hdf5', '.nc', '.mat', '.rds', '.sav'].includes(ext)) return 'data';
@@ -357,10 +350,10 @@ async function uniqueDestination(directory, filename) {
   return candidate;
 }
 
-async function importFiles(workspaceInput, filePaths) {
+async function importFiles(workspaceInput, tokens) {
+  const filePaths = importAuthorizer.consume(tokens);
   const workspace = await ensureWorkspace(normalizeWorkspace(workspaceInput));
-  if (!Array.isArray(filePaths) || filePaths.length === 0) return [];
-  if (filePaths.length > 20) throw new Error('一次最多导入 20 个文件。');
+  if (filePaths.length === 0) return [];
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const destinationDir = path.join(workspace, '.science', 'inputs', stamp);
   await fs.mkdir(destinationDir, { recursive: true });
@@ -462,11 +455,11 @@ function installIpc() {
   ipcMain.handle('workspace:inspect', async () => inspectWorkspace(currentProjectWorkspace()));
   ipcMain.handle('workspace:open', async () => shell.openPath(await ensureWorkspace(currentProjectWorkspace())));
   ipcMain.handle('path:open', async (_event, { relativePath }) => {
-    const resolved = safeWorkspacePath(currentProjectWorkspace(), relativePath);
+    const resolved = await resolveWorkspaceEntry(currentProjectWorkspace(), relativePath);
     return shell.openPath(resolved);
   });
   ipcMain.handle('path:reveal', async (_event, { relativePath }) => {
-    const resolved = safeWorkspacePath(currentProjectWorkspace(), relativePath);
+    const resolved = await resolveWorkspaceEntry(currentProjectWorkspace(), relativePath);
     shell.showItemInFolder(resolved);
   });
 
@@ -475,9 +468,10 @@ function installIpc() {
       title: '导入研究资料',
       properties: ['openFile', 'multiSelections'],
     });
-    return result.canceled ? [] : result.filePaths;
+    return result.canceled ? [] : importAuthorizer.authorize(result.filePaths);
   });
-  ipcMain.handle('files:import', async (_event, { paths }) => importFiles(currentProjectWorkspace(), paths));
+  ipcMain.handle('files:authorize-dropped', async (_event, { paths }) => importAuthorizer.authorize(paths));
+  ipcMain.handle('files:import', async (_event, { tokens }) => importFiles(currentProjectWorkspace(), tokens));
   ipcMain.handle('agent:run', async (event, payload) => runAgent(payload, event.sender));
   ipcMain.handle('agent:cancel', async (_event, runId) => cancelAgent(runId));
   ipcMain.handle('research:recover-run', async (_event, payload) => {

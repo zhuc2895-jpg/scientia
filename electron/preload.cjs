@@ -24,8 +24,13 @@ contextBridge.exposeInMainWorld('scienceAgent', {
   openPath: (relativePath) => ipcRenderer.invoke('path:open', { relativePath }),
   revealPath: (relativePath) => ipcRenderer.invoke('path:reveal', { relativePath }),
   pickFiles: () => ipcRenderer.invoke('files:pick'),
-  importFiles: (paths) => ipcRenderer.invoke('files:import', { paths }),
-  getPathForFile: (file) => webUtils.getPathForFile(file),
+  authorizeDroppedFiles: (files) => {
+    const paths = [...(files || [])].map((file) => {
+      try { return webUtils.getPathForFile(file); } catch { return ''; }
+    }).filter(Boolean);
+    return ipcRenderer.invoke('files:authorize-dropped', { paths });
+  },
+  importFiles: (tokens) => ipcRenderer.invoke('files:import', { tokens }),
   runAgent: (payload) => ipcRenderer.invoke('agent:run', payload),
   cancelAgent: (runId) => ipcRenderer.invoke('agent:cancel', runId),
   recoverRun: (payload) => ipcRenderer.invoke('research:recover-run', payload),

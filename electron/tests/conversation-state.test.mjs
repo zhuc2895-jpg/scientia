@@ -76,6 +76,27 @@ test('run recovery is idempotent after the first review marker is persisted', ()
   assert.equal(second.conversations[0].activities.length, 1);
 });
 
+test('restart recovery retries manifest review when only the running message has a run ID', () => {
+  const conversation = {
+    id: 'conversation-message-run',
+    title: 'Legacy running message',
+    messages: [{
+      id: 'assistant-message-run',
+      role: 'assistant',
+      status: 'running',
+      runId: 'run-from-message',
+      createdAt: '2026-11-17T00:10:00.000Z',
+    }],
+  };
+
+  const result = recoverInterruptedRuns([conversation], { recoveredAt: '2026-11-17T00:20:00.000Z' });
+  const recovered = result.conversations[0];
+
+  assert.deepEqual(result.manifestReviewIds, ['conversation-message-run']);
+  assert.equal(recovered.activeRun.runId, 'run-from-message');
+  assert.equal(recovered.activeRun.assistantId, 'assistant-message-run');
+});
+
 test('conversation snapshots preserve an in-flight run instead of downgrading it', () => {
   const conversation = {
     id: 'conversation-2',
