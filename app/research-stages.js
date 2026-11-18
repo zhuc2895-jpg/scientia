@@ -69,16 +69,32 @@ function normalizeTimestamp(value) {
   return value;
 }
 
+function createResearchStageRecord({
+  status,
+  updatedAt = null,
+  completedAt = null,
+  notApplicableReason = null,
+}) {
+  const normalizedUpdatedAt = normalizeTimestamp(updatedAt);
+  return {
+    status,
+    updatedAt: normalizedUpdatedAt,
+    completedAt: status === 'completed'
+      ? normalizeTimestamp(completedAt) || normalizedUpdatedAt
+      : null,
+    notApplicableReason: status === 'not-applicable' ? notApplicableReason : null,
+  };
+}
+
 function normalizeRecord(record) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
   const updatedAt = normalizeTimestamp(record.updatedAt);
   if (record.status === 'completed') {
-    return {
+    return createResearchStageRecord({
       status: 'completed',
       updatedAt,
-      completedAt: normalizeTimestamp(record.completedAt) || updatedAt,
-      notApplicableReason: null,
-    };
+      completedAt: record.completedAt,
+    });
   }
   if (record.status === 'not-applicable' || record.status === 'not_applicable') {
     let reason = null;
@@ -87,12 +103,11 @@ function normalizeRecord(record) {
     } catch {
       return null;
     }
-    return {
+    return createResearchStageRecord({
       status: 'not-applicable',
       updatedAt,
-      completedAt: null,
       notApplicableReason: reason,
-    };
+    });
   }
   return null;
 }
@@ -167,12 +182,7 @@ export function completeResearchStage(state, stageKey, { completedAt = new Date(
     ...normalized,
     stages: {
       ...normalized.stages,
-      [key]: {
-        status: 'completed',
-        updatedAt,
-        completedAt: updatedAt,
-        notApplicableReason: null,
-      },
+      [key]: createResearchStageRecord({ status: 'completed', updatedAt }),
     },
   };
   return advanceAfterStage(updated, stageIndex(key));
@@ -194,12 +204,11 @@ export function markResearchStageNotApplicable(state, stageKey, reason, { marked
     ...normalized,
     stages: {
       ...normalized.stages,
-      [key]: {
+      [key]: createResearchStageRecord({
         status: 'not-applicable',
         updatedAt,
-        completedAt: null,
         notApplicableReason: normalizedReason,
-      },
+      }),
     },
   };
   return advanceAfterStage(updated, stageIndex(key));
