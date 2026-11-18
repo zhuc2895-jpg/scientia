@@ -165,6 +165,20 @@ async function waitForActiveConversation(cdp, conversationId) {
   throw new Error(`Conversation ${conversationId} did not become active in the renderer.`);
 }
 
+async function waitForResearchStage(cdp, currentStageKey) {
+  const state = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (value) => value.project?.stageGraph?.currentStageKey === currentStageKey,
+  );
+  assert.equal(state.project.stageGraph.currentStageKey, currentStageKey);
+  const renderedStage = await pollUntil(
+    () => evaluate(cdp, `document.querySelector('#project-home')?.dataset.currentStageKey || ''`),
+    (value) => value === currentStageKey,
+  );
+  assert.equal(renderedStage, currentStageKey);
+  return state;
+}
+
 async function findProductDatabaseFiles(directory) {
   const matches = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -262,6 +276,26 @@ try {
   assert.equal(created.conversations.length, 1);
   assert.equal(created.activeId, created.conversations[0].id);
   const expectedId = created.activeId;
+  let stageState = await waitForResearchStage(cdp, 'scoping');
+  assert.equal(await evaluate(cdp, `document.querySelectorAll('.project-stage-card').length`), 6);
+  assert.equal(await evaluate(cdp, `document.querySelector('[data-stage-card="evidence"]')?.classList.contains('pending')`), true);
+  assert.match(await evaluate(cdp, `document.querySelector('[data-stage-card="evidence"]')?.title || ''`), /Scoping/);
+  await evaluate(cdp, `document.querySelector('[data-stage-action="complete"]').click()`);
+  stageState = await waitForResearchStage(cdp, 'evidence');
+  assert.equal(stageState.project.stageGraph.stages.find((stage) => stage.key === 'scoping').status, 'completed');
+  assert.match(await evaluate(cdp, `document.querySelector('[data-stage-card="synthesis"]')?.title || ''`), /Evidence/);
+  await evaluate(cdp, `(() => {
+    document.querySelector('[data-stage-action="not-applicable"]').click();
+    document.querySelector('#stage-na-reason').value = 'The project uses only locally generated simulation output.';
+    document.querySelector('#stage-na-form').requestSubmit();
+    return true;
+  })()`);
+  stageState = await waitForResearchStage(cdp, 'inquiry');
+  const evidenceStage = stageState.project.stageGraph.stages.find((stage) => stage.key === 'evidence');
+  assert.equal(evidenceStage.status, 'not_applicable');
+  assert.equal(evidenceStage.notApplicableReason, 'The project uses only locally generated simulation output.');
+  console.log('OK   Research Stage graph exposes locks and persists completed and not-applicable stages');
+
   const workspaceGuard = await evaluate(cdp, `(async () => {
     const config = await window.scienceAgent.configLoad();
     const rebound = await window.scienceAgent.configSave({ ...config, workspace: 'C:\\\\Research\\\\Other Project' })
@@ -305,6 +339,7 @@ try {
   assert.equal(managedState.activeProjectId, managedProject.id);
   assert.equal(managedProject.workspaceKind, 'managed');
   assert.equal(managedProject.workspacePath.startsWith(path.join(userData, 'managed-workspaces')), true);
+  assert.equal(managedProject.stageGraph.currentStageKey, 'scoping');
   assert.equal(managedState.conversations.length, 0);
   const activeProjectLabel = await pollUntil(
     () => evaluate(cdp, `document.querySelector('.project-item.active .project-item-name')?.textContent || ''`),
@@ -337,6 +372,7 @@ try {
   assert.equal(switchedState.activeProjectId, initialProjectId);
   assert.equal(switchedState.activeId, expectedId);
   assert.equal(switchedState.conversations.length, 1);
+  assert.equal(switchedState.project.stageGraph.currentStageKey, 'inquiry');
   const activeWorkspace = await pollUntil(
     async () => (await evaluate(cdp, 'window.scienceAgent.configLoad()')).workspace,
     (value) => value === workspace,
@@ -397,6 +433,11 @@ try {
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);
   const withSecondConversation = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+  assert.equal(withSecondConversation.project.stageGraph.currentStageKey, 'inquiry');
+  await evaluate(cdp, `document.querySelector('[data-conversation-id="${expectedId}"]').click()`);
+  await waitForActiveConversation(cdp, expectedId);
+  assert.equal(await evaluate(cdp, `document.querySelector('#project-home').dataset.currentStageKey`), 'inquiry');
+  console.log('OK   Research Stage state remains visible while switching Conversations in one Project');
   const firstConversation = withSecondConversation.conversations.find((conversation) => conversation.id === expectedId);
   const updatedConversation = {
     ...firstConversation,
@@ -417,6 +458,10 @@ try {
   assert.equal(restored.activeId, expectedId);
   assert.equal(restored.conversations.find((conversation) => conversation.id === expectedId).title, 'Durable evidence review');
   assert.equal(restored.conversations.find((conversation) => conversation.id === expectedId).messages[0].content, 'Persist this exact message.');
+  assert.equal(restored.project.stageGraph.currentStageKey, 'inquiry');
+  assert.equal(restored.project.stageGraph.stages.find((stage) => stage.key === 'scoping').status, 'completed');
+  assert.equal(restored.project.stageGraph.stages.find((stage) => stage.key === 'evidence').status, 'not_applicable');
+  assert.equal(restored.project.stageGraph.stages.find((stage) => stage.key === 'evidence').notApplicableReason, 'The project uses only locally generated simulation output.');
   console.log('OK   Product state survives an Electron restart');
 
   const interruptedConversation = {

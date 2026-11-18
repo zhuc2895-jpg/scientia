@@ -33,6 +33,8 @@
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5.2-3.4 8.5-8 10-4.6-1.5-8-4.8-8-10V6Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></symbol>
     <symbol id="i-command" viewBox="0 0 24 24"><path d="M9 6a3 3 0 1 0-3 3h3Zm0 0v12m0-12h6m-6 12a3 3 0 1 1-3-3h3Zm6-12a3 3 0 1 1 3 3h-3Zm0 0v12m0 0a3 3 0 1 0 3-3h-3Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
   </svg>
 
   <header class="mac-menubar" aria-label="macOS 菜单栏">
@@ -123,6 +125,24 @@
           <button class="icon-button" id="open-settings" title="设置" aria-label="设置"><svg><use href="#i-settings"/></svg></button>
         </div>
       </header>
+
+      <section class="project-home" id="project-home" hidden aria-label="Research Project 阶段图">
+        <div class="project-home-heading">
+          <div class="project-home-title">
+            <span>Project Home // Research Stage Graph</span>
+            <strong id="project-home-name">Research Project</strong>
+          </div>
+          <div class="project-home-current">
+            <span>Current stage</span>
+            <strong id="project-home-current">Scoping</strong>
+          </div>
+        </div>
+        <div class="project-stage-track" id="project-stage-track"></div>
+        <div class="project-next-action">
+          <div class="project-next-copy"><span>Next allowed action</span><p id="project-next-description"></p></div>
+          <div class="project-stage-actions" id="project-stage-actions"></div>
+        </div>
+      </section>
 
       <section class="chat-scroll" id="chat-scroll" aria-live="polite">
         <div class="welcome" id="welcome">
@@ -306,6 +326,31 @@
         <div class="dialog-footer-actions">
           <button type="button" class="secondary-button" id="cancel-project">取消</button>
           <button type="submit" class="primary-button" id="create-project">创建 Research Project</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="settings-dialog stage-na-dialog" id="stage-na-dialog">
+    <form id="stage-na-form">
+      <div class="dialog-header">
+        <div>
+          <div class="dialog-kicker">Research Stage exception</div>
+          <h2 id="stage-na-title">标记为不适用</h2>
+          <p>记录原因后，这个阶段会保留在 Research Stage 图中并从当前工作流跳过。</p>
+        </div>
+        <button class="icon-button subtle" type="button" id="cancel-stage-na-icon" aria-label="关闭"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <div class="dialog-body">
+        <label class="field-label" for="stage-na-reason">不适用原因</label>
+        <textarea id="stage-na-reason" maxlength="500" rows="4" required placeholder="说明为什么该项目不需要此阶段，以及这一决定对研究边界的影响。"></textarea>
+        <div class="field-help">原因属于 Research Project 状态，会随项目持久保存并在阶段图中可见。</div>
+      </div>
+      <div class="dialog-footer">
+        <span class="dialog-footnote">该操作不会删除任何 Conversation、来源或已有产出。</span>
+        <div class="dialog-footer-actions">
+          <button type="button" class="secondary-button" id="cancel-stage-na">取消</button>
+          <button type="submit" class="primary-button" id="confirm-stage-na">记录原因并跳过</button>
         </div>
       </div>
     </form>

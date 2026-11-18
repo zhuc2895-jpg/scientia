@@ -1,4 +1,12 @@
 import {
+  buildResearchStageGraph,
+  completeResearchStage,
+  createInitialResearchStageState,
+  markResearchStageNotApplicable,
+  normalizeResearchStageState,
+  reopenResearchStage,
+} from './research-stages.js';
+import {
   buildRunContinuationPrompt,
   canContinueRecoveredRun,
   conversationSnapshot,
@@ -28,6 +36,7 @@ const state = {
   conversations: [],
   activeId: null,
   pendingProjectImport: null,
+  pendingStageNotApplicableKey: null,
   pendingAttachments: [],
   evidenceMode: localStorage.getItem(UI_KEY + '.evidence') !== 'off',
   activeRun: null,
@@ -45,6 +54,17 @@ const els = {
   conversationList: $('#conversation-list'),
   appTabs: $('#app-tabs'),
   announcement: $('#announcement'),
+  projectHome: $('#project-home'),
+  projectHomeName: $('#project-home-name'),
+  projectHomeCurrent: $('#project-home-current'),
+  projectStageTrack: $('#project-stage-track'),
+  projectNextDescription: $('#project-next-description'),
+  projectStageActions: $('#project-stage-actions'),
+  stageNotApplicableDialog: $('#stage-na-dialog'),
+  stageNotApplicableForm: $('#stage-na-form'),
+  stageNotApplicableTitle: $('#stage-na-title'),
+  stageNotApplicableReason: $('#stage-na-reason'),
+  stageNotApplicableConfirm: $('#confirm-stage-na'),
   welcomeGreeting: $('#welcome-greeting'),
   contextWorkspaceName: $('#context-workspace-name'),
   conversationSearch: $('#conversation-search'),
@@ -480,6 +500,154 @@ function renderHeader() {
   if (els.contextWorkspaceName) els.contextWorkspaceName.textContent = project?.name || '研究工作区';
 }
 
+function activeResearchStageGraph() {
+  return state.project?.stageGraph || null;
+}
+
+function stageMutationBusy() {
+  return Boolean(state.activeRun) || state.daemon?.state === 'running';
+}
+
+function stageStatusText(stage) {
+  if (stage.isCurrent) return stage.isCompleted ? '当前阶段 · 复核中' : '当前阶段';
+  if (stage.isCompleted) return '已完成 · 可重新进入';
+  if (stage.isNotApplicable) return '不适用';
+  return '已锁定';
+}
+
+function renderResearchStages() {
+  if (!els.projectHome) return;
+  const graph = activeResearchStageGraph();
+  if (!graph) {
+    els.projectHome.hidden = true;
+    return;
+  }
+  const project = activeResearchProject();
+  const busy = stageMutationBusy();
+  els.projectHome.hidden = false;
+  els.projectHome.dataset.currentStageKey = graph.currentStageKey || '';
+  els.projectHomeName.textContent = project?.name || 'Research Project';
+  els.projectHomeCurrent.textContent = graph.currentStage
+    ? `${graph.currentStage.englishLabel} / ${graph.currentStage.label}`
+    : 'COMPLETE';
+  els.projectStageTrack.innerHTML = graph.stages.map((stage) => {
+    const detail = stage.isNotApplicable
+      ? `原因：${stage.notApplicableReason || ''}`
+      : stage.isCurrent
+        ? stage.description
+        : stage.isCompleted
+          ? '点击可重新进入该阶段并开展迭代复核。'
+          : stage.lockReason;
+    const stateIcon = stage.isCurrent
+      ? '<span class="stage-current-pip" aria-hidden="true"></span>'
+      : stage.isCompleted
+        ? icon('check')
+        : stage.isNotApplicable
+          ? '<span class="stage-na-mark">N/A</span>'
+          : icon('lock');
+    return `
+      <button type="button" class="project-stage-card ${escapeHTML(stage.status)}${stage.isCompleted ? ' completed' : ''}" data-stage-card="${escapeHTML(stage.key)}" aria-label="${escapeHTML(`${stage.englishLabel}，${stageStatusText(stage)}`)}"${stage.isLocked ? ' aria-disabled="true"' : ''} title="${escapeHTML(detail)}">
+        <span class="project-stage-index">${String(stage.index + 1).padStart(2, '0')}</span>
+        <span class="project-stage-copy">
+          <strong>${escapeHTML(stage.englishLabel)}<small>${escapeHTML(stage.label)}</small></strong>
+          <span>${escapeHTML(stageStatusText(stage))}</span>
+        </span>
+        <span class="project-stage-state">${stateIcon}</span>
+      </button>`;
+  }).join('');
+  els.projectNextDescription.textContent = graph.nextAction.description;
+  const actions = [];
+  if (graph.nextAction.allowedActions.includes('complete')) {
+    actions.push(`<button type="button" class="stage-primary-action" data-stage-action="complete"${busy ? ' disabled' : ''}>${escapeHTML(graph.nextAction.label)}</button>`);
+  }
+  if (graph.nextAction.allowedActions.includes('not_applicable')) {
+    actions.push(`<button type="button" class="stage-secondary-action" data-stage-action="not-applicable"${busy ? ' disabled' : ''}>标记不适用</button>`);
+  }
+  els.projectStageActions.innerHTML = actions.join('');
+}
+
+async function applyResearchStageProductState(operation, message) {
+  try {
+    const productState = await operation();
+    applyProductState(productState);
+    renderAll();
+    showToast(message);
+  } catch (error) {
+    showToast(error.message || '无法更新 Research Stage。', 5000);
+  }
+}
+
+function completeCurrentResearchStage(stageKey) {
+  if (stageMutationBusy()) {
+    showToast('Research Run 进行中，暂不能推进 Research Stage。');
+    return;
+  }
+  const stage = activeResearchStageGraph()?.stages.find((item) => item.key === stageKey);
+  void applyResearchStageProductState(
+    () => bridge.projectStageComplete(stageKey),
+    `${stage?.englishLabel || '当前阶段'} 已完成。`,
+  );
+}
+
+function reopenCompletedResearchStage(stageKey) {
+  if (stageMutationBusy()) {
+    showToast('Research Run 进行中，暂不能重新进入 Research Stage。');
+    return;
+  }
+  const stage = activeResearchStageGraph()?.stages.find((item) => item.key === stageKey);
+  if (!stage?.isCompleted) return;
+  void applyResearchStageProductState(
+    () => bridge.projectStageReopen(stageKey),
+    `已重新进入 ${stage.englishLabel}；现有完成记录会保留。`,
+  );
+}
+
+function openStageNotApplicableDialog(stageKey) {
+  if (stageMutationBusy()) {
+    showToast('Research Run 进行中，暂不能标记 Research Stage。');
+    return;
+  }
+  const stage = activeResearchStageGraph()?.stages.find((item) => item.key === stageKey);
+  if (!stage || !stage.isCurrent || stage.isCompleted) return;
+  state.pendingStageNotApplicableKey = stageKey;
+  els.stageNotApplicableTitle.textContent = `将 ${stage.englishLabel} 标记为不适用`;
+  els.stageNotApplicableReason.value = '';
+  if (!els.stageNotApplicableDialog.open) els.stageNotApplicableDialog.showModal();
+  requestAnimationFrame(() => els.stageNotApplicableReason.focus());
+}
+
+function closeStageNotApplicableDialog() {
+  state.pendingStageNotApplicableKey = null;
+  if (els.stageNotApplicableDialog?.open) els.stageNotApplicableDialog.close();
+}
+
+async function submitStageNotApplicable(event) {
+  event.preventDefault();
+  const stageKey = state.pendingStageNotApplicableKey;
+  const reason = els.stageNotApplicableReason.value.trim();
+  if (!stageKey) return;
+  if (!reason) {
+    showToast('请记录该阶段不适用的原因。');
+    els.stageNotApplicableReason.focus();
+    return;
+  }
+  const stage = activeResearchStageGraph()?.stages.find((item) => item.key === stageKey);
+  els.stageNotApplicableConfirm.disabled = true;
+  els.stageNotApplicableConfirm.textContent = '正在保存…';
+  try {
+    const productState = await bridge.projectStageNotApplicable({ stageKey, reason });
+    closeStageNotApplicableDialog();
+    applyProductState(productState);
+    renderAll();
+    showToast(`${stage?.englishLabel || '当前阶段'} 已标记为不适用，原因已记录。`);
+  } catch (error) {
+    showToast(error.message || '无法标记 Research Stage。', 5000);
+  } finally {
+    els.stageNotApplicableConfirm.disabled = false;
+    els.stageNotApplicableConfirm.textContent = '记录原因并跳过';
+  }
+}
+
 function renderPendingAttachments() {
   const attachments = state.pendingAttachments;
   els.attachmentTray.classList.toggle('has-items', attachments.length > 0);
@@ -712,6 +880,7 @@ function renderAll() {
   if (els.researchMode) els.researchMode.value = activeConversation()?.researchMode || 'auto';
   renderAppTabs();
   renderGreeting();
+  renderResearchStages();
   renderResearchProjectList();
   renderConversationList();
   renderHeader();
@@ -1420,6 +1589,36 @@ function bindEvents() {
     }
   });
 
+  els.projectHome.addEventListener('click', (event) => {
+    const action = event.target.closest('[data-stage-action]');
+    if (action) {
+      const graph = activeResearchStageGraph();
+      if (!graph?.currentStage) return;
+      if (action.dataset.stageAction === 'complete') completeCurrentResearchStage(graph.currentStage.key);
+      else if (action.dataset.stageAction === 'not-applicable') openStageNotApplicableDialog(graph.currentStage.key);
+      return;
+    }
+    const card = event.target.closest('[data-stage-card]');
+    if (!card) return;
+    const stage = activeResearchStageGraph()?.stages.find((item) => item.key === card.dataset.stageCard);
+    if (!stage) return;
+    if (stage.isCurrent) return;
+    if (stage.isCompleted) {
+      reopenCompletedResearchStage(stage.key);
+      return;
+    }
+    if (stage.isNotApplicable) {
+      showToast(`${stage.englishLabel} 已标记为不适用：${stage.notApplicableReason}`, 5000);
+      return;
+    }
+    showToast(stage.lockReason || `${stage.englishLabel} 尚未解锁。`);
+  });
+
+  els.stageNotApplicableForm.addEventListener('submit', submitStageNotApplicable);
+  $('#cancel-stage-na').addEventListener('click', closeStageNotApplicableDialog);
+  $('#cancel-stage-na-icon').addEventListener('click', closeStageNotApplicableDialog);
+  els.stageNotApplicableDialog.addEventListener('close', () => { state.pendingStageNotApplicableKey = null; });
+
   els.conversationList.addEventListener('click', (event) => {
     const deleteButton = event.target.closest('[data-delete-conversation]');
     if (deleteButton) {
@@ -1685,14 +1884,19 @@ function createPreviewBridge() {
     archivedAt: null,
   }];
   let previewActiveProjectId = previewProjects[0].id;
+  const previewStageStates = new Map([[previewActiveProjectId, createInitialResearchStageState()]]);
   const previewConversationsByProject = new Map([[previewActiveProjectId, []]]);
   const previewActiveConversationByProject = new Map([[previewActiveProjectId, null]]);
   let previewMigrationComplete = false;
   const previewProject = () => previewProjects.find((project) => project.id === previewActiveProjectId) || null;
+  const previewSerializeProject = (project) => (project ? {
+    ...structuredClone(project),
+    stageGraph: buildResearchStageGraph(normalizeResearchStageState(previewStageStates.get(project.id) || createInitialResearchStageState())),
+  } : null);
   const previewProductState = () => ({
-    projects: previewProjects.map((project) => structuredClone(project)),
+    projects: previewProjects.map(previewSerializeProject),
     activeProjectId: previewActiveProjectId,
-    project: previewProject() ? structuredClone(previewProject()) : null,
+    project: previewSerializeProject(previewProject()),
     conversations: (previewConversationsByProject.get(previewActiveProjectId) || []).map((conversation) => structuredClone(conversation)),
     activeId: previewActiveConversationByProject.get(previewActiveProjectId) || null,
     migrationComplete: previewMigrationComplete,
@@ -1728,6 +1932,7 @@ function createPreviewBridge() {
       const id = `preview-project-${previewProjects.length + 1}`;
       const workspacePath = `${previewWorkspace} Managed ${id}`;
       previewProjects.unshift({ id, name, workspacePath, workspaceKind: 'managed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archivedAt: null });
+      previewStageStates.set(id, createInitialResearchStageState());
       previewConversationsByProject.set(id, []);
       previewActiveConversationByProject.set(id, null);
       previewActiveProjectId = id;
@@ -1738,6 +1943,7 @@ function createPreviewBridge() {
       const id = `preview-project-${previewProjects.length + 1}`;
       const workspacePath = `${previewWorkspace} Imported ${id}`;
       previewProjects.unshift({ id, name, workspacePath, workspaceKind: 'imported', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archivedAt: null });
+      previewStageStates.set(id, createInitialResearchStageState());
       previewConversationsByProject.set(id, []);
       previewActiveConversationByProject.set(id, null);
       previewActiveProjectId = id;
@@ -1769,11 +1975,27 @@ function createPreviewBridge() {
       const index = previewProjects.findIndex((item) => item.id === id);
       if (index < 0) throw new Error('无法删除 Research Project。');
       const deletedProject = previewProjects.splice(index, 1)[0];
+      previewStageStates.delete(id);
       previewConversationsByProject.delete(id);
       previewActiveConversationByProject.delete(id);
       if (previewActiveProjectId === id) previewActiveProjectId = previewProjects.find((item) => !item.archivedAt)?.id || null;
       previewConfig.workspace = previewProject()?.workspacePath || '';
       return { ...previewProductState(), deletedProject };
+    },
+    async projectStageComplete(stageKey) {
+      const current = previewStageStates.get(previewActiveProjectId) || createInitialResearchStageState();
+      previewStageStates.set(previewActiveProjectId, completeResearchStage(current, stageKey));
+      return previewProductState();
+    },
+    async projectStageNotApplicable({ stageKey, reason }) {
+      const current = previewStageStates.get(previewActiveProjectId) || createInitialResearchStageState();
+      previewStageStates.set(previewActiveProjectId, markResearchStageNotApplicable(current, stageKey, reason));
+      return previewProductState();
+    },
+    async projectStageReopen(stageKey) {
+      const current = previewStageStates.get(previewActiveProjectId) || createInitialResearchStageState();
+      previewStageStates.set(previewActiveProjectId, reopenResearchStage(current, stageKey));
+      return previewProductState();
     },
     async conversationCreate(conversation) {
       const items = previewConversationsByProject.get(previewActiveProjectId) || [];

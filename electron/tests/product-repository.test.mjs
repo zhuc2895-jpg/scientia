@@ -495,3 +495,91 @@ test('whitespace-only Research Workspace paths are unbound in queries and lookup
   assert.deepEqual(state.projects, []);
   assert.equal(repository.getProject('scientia-default-project'), null);
 });
+
+test('research stages persist completed and not-applicable state across restarts', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const initial = repository.loadState().project.stageGraph;
+  assert.equal(initial.currentStageKey, 'scoping');
+  assert.deepEqual(
+    initial.stages.map((stage) => stage.englishLabel),
+    ['Scoping', 'Evidence', 'Inquiry', 'Synthesis', 'Manuscript', 'Release'],
+  );
+  assert.match(initial.stages[1].lockReason, /Scoping/);
+
+  repository.completeResearchStage('scoping');
+  repository.markResearchStageNotApplicable({
+    stageKey: 'evidence',
+    reason: 'This manuscript uses only project-generated simulation data.',
+  });
+  const beforeRestart = repository.loadState().project.stageGraph;
+  assert.equal(beforeRestart.currentStageKey, 'inquiry');
+  assert.equal(beforeRestart.stages[0].status, 'completed');
+  assert.equal(beforeRestart.stages[1].status, 'not_applicable');
+  assert.equal(beforeRestart.stages[1].notApplicableReason, 'This manuscript uses only project-generated simulation data.');
+  assert.match(beforeRestart.nextAction.description, /Synthesis/);
+  repository.close();
+
+  repository = openTestRepository(databasePath);
+  const restored = repository.loadState().project.stageGraph;
+  assert.equal(restored.currentStageKey, 'inquiry');
+  assert.equal(restored.stages[0].status, 'completed');
+  assert.equal(restored.stages[1].status, 'not_applicable');
+  assert.equal(restored.stages[1].notApplicableReason, 'This manuscript uses only project-generated simulation data.');
+  assert.equal(restored.progress.completed, 1);
+  assert.equal(restored.progress.notApplicable, 1);
+});
+
+test('research stage state is project-scoped and completed stages can be revisited', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const initialProjectId = repository.loadState().activeProjectId;
+  repository.completeResearchStage('scoping');
+  repository.completeResearchStage('evidence');
+
+  const otherProject = repository.createProject({
+    id: 'project-stage-isolation',
+    name: 'Stage Isolation',
+    workspacePath: 'C:/Research/Stage-Isolation',
+    workspaceKind: 'imported',
+  });
+  assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'scoping');
+
+  repository.setActiveProject(initialProjectId);
+  const original = repository.loadState().project;
+  assert.equal(original.stageGraph.currentStageKey, 'inquiry');
+  assert.equal(original.stageGraph.stages[1].status, 'completed');
+
+  repository.reopenResearchStage('scoping');
+  const reopened = repository.loadState().project.stageGraph;
+  assert.equal(reopened.currentStageKey, 'scoping');
+  assert.equal(reopened.currentStage.isCompleted, true);
+  assert.deepEqual(reopened.nextAction.allowedActions, ['complete']);
+
+  repository.setActiveProject(otherProject.id);
+  assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'scoping');
+});
+
+test('research stage mutations reject invalid transitions and missing skip reasons', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  assert.throws(() => repository.completeResearchStage('evidence'), /当前阶段/);
+  assert.throws(() => repository.completeResearchStage('unknown'), /阶段/);
+  assert.throws(() => repository.markResearchStageNotApplicable({ stageKey: 'scoping', reason: '   ' }), /原因/);
+  assert.throws(() => repository.reopenResearchStage('scoping'), /完成/);
+});

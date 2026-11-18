@@ -3,6 +3,13 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { normalizeConversation } from '../app/conversation-state.js';
+import {
+  buildResearchStageGraph,
+  completeResearchStage,
+  markResearchStageNotApplicable,
+  normalizeResearchStageState,
+  reopenResearchStage,
+} from '../app/research-stages.js';
 import { isWithin } from './path-boundary.js';
 
 const ACTIVE_PROJECT_KEY = 'active_project_id';
@@ -53,6 +60,8 @@ export function openProductRepository({ databasePath }) {
       name TEXT NOT NULL,
       workspace_path TEXT,
       workspace_kind TEXT NOT NULL DEFAULT 'imported',
+      current_stage_key TEXT NOT NULL DEFAULT 'scoping',
+      research_stage_states_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       archived_at TEXT
@@ -83,6 +92,12 @@ export function openProductRepository({ databasePath }) {
   }
   if (!projectColumns.some((column) => column.name === 'archived_at')) {
     database.exec('ALTER TABLE projects ADD COLUMN archived_at TEXT');
+  }
+  if (!projectColumns.some((column) => column.name === 'current_stage_key')) {
+    database.exec("ALTER TABLE projects ADD COLUMN current_stage_key TEXT NOT NULL DEFAULT 'scoping'");
+  }
+  if (!projectColumns.some((column) => column.name === 'research_stage_states_json')) {
+    database.exec("ALTER TABLE projects ADD COLUMN research_stage_states_json TEXT NOT NULL DEFAULT '{}'");
   }
   const bootstrapState = database.prepare('SELECT value FROM app_state WHERE key = ?').get(DEFAULT_PROJECT_BOOTSTRAP_KEY);
   if (!bootstrapState) {
@@ -120,11 +135,13 @@ export function openProductRepository({ databasePath }) {
     VALUES (?, ?, ?, ?, ?, ?, NULL)
   `);
   const selectProject = database.prepare(`
-    SELECT id, name, workspace_path, workspace_kind, created_at, updated_at, archived_at
+    SELECT id, name, workspace_path, workspace_kind, current_stage_key, research_stage_states_json,
+           created_at, updated_at, archived_at
     FROM projects WHERE id = ?
   `);
   const selectProjects = database.prepare(`
-    SELECT id, name, workspace_path, workspace_kind, created_at, updated_at, archived_at
+    SELECT id, name, workspace_path, workspace_kind, current_stage_key, research_stage_states_json,
+           created_at, updated_at, archived_at
     FROM projects
     ORDER BY (archived_at IS NOT NULL) ASC, updated_at DESC, id ASC
   `);
@@ -133,6 +150,11 @@ export function openProductRepository({ databasePath }) {
   `);
   const archiveProject = database.prepare('UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ?');
   const restoreProject = database.prepare('UPDATE projects SET archived_at = NULL, updated_at = ? WHERE id = ?');
+  const updateResearchStageState = database.prepare(`
+    UPDATE projects
+    SET current_stage_key = ?, research_stage_states_json = ?, updated_at = ?
+    WHERE id = ?
+  `);
   const deleteProject = database.prepare('DELETE FROM projects WHERE id = ?');
   const selectActiveState = database.prepare('SELECT value FROM app_state WHERE key = ?');
   const setAppState = database.prepare(`
@@ -150,6 +172,20 @@ export function openProductRepository({ databasePath }) {
     return typeof row?.workspace_path === 'string' && row.workspace_path.trim() !== '';
   }
 
+  function researchStageStateForRow(row) {
+    let stages = {};
+    try {
+      const parsed = JSON.parse(row?.research_stage_states_json || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) stages = parsed;
+    } catch {
+      // Corrupt derived stage records recover to the beginning of the project stage graph.
+    }
+    return normalizeResearchStageState({
+      currentStageKey: row?.current_stage_key || null,
+      stages,
+    });
+  }
+
   function serializeProject(row) {
     if (!row) return null;
     return {
@@ -160,6 +196,7 @@ export function openProductRepository({ databasePath }) {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       archivedAt: row.archived_at || null,
+      stageGraph: buildResearchStageGraph(researchStageStateForRow(row)),
     };
   }
 
@@ -363,6 +400,38 @@ export function openProductRepository({ databasePath }) {
     return selectProjects.all().filter(isBoundResearchProjectRow).map((row) => row.workspace_path);
   }
 
+  function mutateResearchStageState(transform) {
+    assertOpen();
+    const project = assertActiveProject();
+    const nextState = transform(researchStageStateForRow(project));
+    const timestamp = new Date().toISOString();
+    updateResearchStageState.run(
+      nextState.currentStageKey,
+      JSON.stringify(nextState.stages),
+      timestamp,
+      project.id,
+    );
+    return loadState();
+  }
+
+  function completeResearchStageRecord(stageKey) {
+    return mutateResearchStageState((state) => completeResearchStage(state, stageKey, {
+      completedAt: new Date().toISOString(),
+    }));
+  }
+
+  function markResearchStageNotApplicableRecord({ stageKey, reason } = {}) {
+    return mutateResearchStageState((state) => markResearchStageNotApplicable(state, stageKey, reason, {
+      markedAt: new Date().toISOString(),
+    }));
+  }
+
+  function reopenResearchStageRecord(stageKey) {
+    return mutateResearchStageState((state) => reopenResearchStage(state, stageKey, {
+      reopenedAt: new Date().toISOString(),
+    }));
+  }
+
   function getConversationProjectId(id) {
     assertOpen();
     if (typeof id !== 'string' || !id) return null;
@@ -490,6 +559,9 @@ export function openProductRepository({ databasePath }) {
     getProject,
     getActiveResearchWorkspacePath,
     getBoundResearchWorkspacePaths,
+    completeResearchStage: completeResearchStageRecord,
+    markResearchStageNotApplicable: markResearchStageNotApplicableRecord,
+    reopenResearchStage: reopenResearchStageRecord,
     getConversationProjectId,
     bindPendingBootstrapResearchProject,
     createProject,

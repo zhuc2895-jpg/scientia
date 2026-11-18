@@ -487,6 +487,22 @@ function installIpc() {
     });
   });
 
+  ipcMain.handle('project:stage-complete', (_event, stageKey) => {
+    assertNoActiveResearchRun();
+    return productRepository.completeResearchStage(stageKey);
+  });
+  ipcMain.handle('project:stage-not-applicable', (_event, payload) => {
+    assertNoActiveResearchRun();
+    return productRepository.markResearchStageNotApplicable({
+      stageKey: payload?.stageKey,
+      reason: payload?.reason,
+    });
+  });
+  ipcMain.handle('project:stage-reopen', (_event, stageKey) => {
+    assertNoActiveResearchRun();
+    return productRepository.reopenResearchStage(stageKey);
+  });
+
   ipcMain.handle('conversation:create', (_event, conversation) => productRepository.createConversation(conversation));
   ipcMain.handle('conversation:update', (_event, conversation) => productRepository.updateConversation(conversation));
   ipcMain.handle('conversation:delete', (_event, id) => productRepository.deleteConversation(id));
