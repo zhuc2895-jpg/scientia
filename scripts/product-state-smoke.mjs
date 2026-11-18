@@ -292,7 +292,7 @@ try {
   })()`);
   stageState = await waitForResearchStage(cdp, 'inquiry');
   const evidenceStage = stageState.project.stageGraph.stages.find((stage) => stage.key === 'evidence');
-  assert.equal(evidenceStage.status, 'not_applicable');
+  assert.equal(evidenceStage.status, 'not-applicable');
   assert.equal(evidenceStage.notApplicableReason, 'The project uses only locally generated simulation output.');
   console.log('OK   Research Stage graph exposes locks and persists completed and not-applicable stages');
 
@@ -460,7 +460,7 @@ try {
   assert.equal(restored.conversations.find((conversation) => conversation.id === expectedId).messages[0].content, 'Persist this exact message.');
   assert.equal(restored.project.stageGraph.currentStageKey, 'inquiry');
   assert.equal(restored.project.stageGraph.stages.find((stage) => stage.key === 'scoping').status, 'completed');
-  assert.equal(restored.project.stageGraph.stages.find((stage) => stage.key === 'evidence').status, 'not_applicable');
+  assert.equal(restored.project.stageGraph.stages.find((stage) => stage.key === 'evidence').status, 'not-applicable');
   assert.equal(restored.project.stageGraph.stages.find((stage) => stage.key === 'evidence').notApplicableReason, 'The project uses only locally generated simulation output.');
   console.log('OK   Product state survives an Electron restart');
 

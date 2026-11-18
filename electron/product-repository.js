@@ -406,7 +406,7 @@ export function openProductRepository({ databasePath }) {
     const nextState = transform(researchStageStateForRow(project));
     const timestamp = new Date().toISOString();
     updateResearchStageState.run(
-      nextState.currentStageKey,
+      nextState.currentStageKey || '',
       JSON.stringify(nextState.stages),
       timestamp,
       project.id,

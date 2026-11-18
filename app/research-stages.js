@@ -38,7 +38,8 @@ export const RESEARCH_STAGES = Object.freeze([
 ]);
 
 const STAGE_KEYS = new Set(RESEARCH_STAGES.map((stage) => stage.key));
-const TERMINAL_STATUSES = new Set(['completed', 'not_applicable']);
+const REOPENABLE_STAGE_KEYS = new Set(['evidence', 'inquiry', 'synthesis']);
+const TERMINAL_STATUSES = new Set(['completed', 'not-applicable']);
 const MAX_REASON_LENGTH = 500;
 
 function stageIndex(key) {
@@ -79,7 +80,7 @@ function normalizeRecord(record) {
       notApplicableReason: null,
     };
   }
-  if (record.status === 'not_applicable') {
+  if (record.status === 'not-applicable' || record.status === 'not_applicable') {
     let reason = null;
     try {
       reason = normalizeReason(record.notApplicableReason);
@@ -87,7 +88,7 @@ function normalizeRecord(record) {
       return null;
     }
     return {
-      status: 'not_applicable',
+      status: 'not-applicable',
       updatedAt,
       completedAt: null,
       notApplicableReason: reason,
@@ -126,7 +127,7 @@ export function normalizeResearchStageState(value) {
   let currentStageKey = typeof source.currentStageKey === 'string' && STAGE_KEYS.has(source.currentStageKey)
     ? source.currentStageKey
     : firstUnresolvedStageKey(stages);
-  if (currentStageKey && stages[currentStageKey]?.status === 'not_applicable') {
+  if (currentStageKey && stages[currentStageKey]?.status === 'not-applicable') {
     currentStageKey = firstUnresolvedStageKey(stages);
   }
   if (!currentStageKey) currentStageKey = null;
@@ -181,7 +182,7 @@ export function markResearchStageNotApplicable(state, stageKey, reason, { marked
     stages: {
       ...normalized.stages,
       [key]: {
-        status: 'not_applicable',
+        status: 'not-applicable',
         updatedAt,
         completedAt: null,
         notApplicableReason: normalizedReason,
@@ -194,6 +195,9 @@ export function markResearchStageNotApplicable(state, stageKey, reason, { marked
 export function reopenResearchStage(state, stageKey, { reopenedAt = new Date().toISOString() } = {}) {
   const key = normalizeStageKey(stageKey);
   const normalized = normalizeResearchStageState(state);
+  if (!REOPENABLE_STAGE_KEYS.has(key)) {
+    throw new Error('只有 Evidence、Inquiry 和 Synthesis 可以重新进入。');
+  }
   if (normalized.stages[key]?.status !== 'completed') {
     throw new Error('只有已完成阶段可以重新进入。');
   }
@@ -218,8 +222,8 @@ export function buildResearchStageGraph(value) {
     const record = state.stages[definition.key] || null;
     const isCurrent = definition.key === state.currentStageKey;
     const isCompleted = record?.status === 'completed';
-    const isNotApplicable = record?.status === 'not_applicable';
-    const status = isCurrent ? 'current' : isCompleted ? 'completed' : isNotApplicable ? 'not_applicable' : 'pending';
+    const isNotApplicable = record?.status === 'not-applicable';
+    const status = isCurrent ? 'current' : isCompleted ? 'completed' : isNotApplicable ? 'not-applicable' : 'pending';
     let lockReason = '';
     if (status === 'pending') {
       if (currentStageDefinition) {
@@ -237,6 +241,7 @@ export function buildResearchStageGraph(value) {
       isCurrent,
       isCompleted,
       isNotApplicable,
+      canReopen: isCompleted && REOPENABLE_STAGE_KEYS.has(definition.key),
       isLocked: status === 'pending',
       lockReason,
       completedAt: record?.completedAt || null,
@@ -250,7 +255,7 @@ export function buildResearchStageGraph(value) {
     ? {
         type: 'advance',
         stageKey: currentStage.key,
-        allowedActions: currentStage.isCompleted ? ['complete'] : ['complete', 'not_applicable'],
+        allowedActions: currentStage.isCompleted ? ['complete'] : ['complete', 'not-applicable'],
         label: currentStage.isCompleted ? `完成 ${currentStage.englishLabel} 复核` : `完成 ${currentStage.englishLabel}`,
         description: currentStage.isCompleted
           ? `该阶段保留完成记录。完成本次复核后，${nextUnresolved?.englishLabel || 'Research Stage 图'}将成为下一步。`

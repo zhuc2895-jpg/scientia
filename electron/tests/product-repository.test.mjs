@@ -520,7 +520,7 @@ test('research stages persist completed and not-applicable state across restarts
   const beforeRestart = repository.loadState().project.stageGraph;
   assert.equal(beforeRestart.currentStageKey, 'inquiry');
   assert.equal(beforeRestart.stages[0].status, 'completed');
-  assert.equal(beforeRestart.stages[1].status, 'not_applicable');
+  assert.equal(beforeRestart.stages[1].status, 'not-applicable');
   assert.equal(beforeRestart.stages[1].notApplicableReason, 'This manuscript uses only project-generated simulation data.');
   assert.match(beforeRestart.nextAction.description, /Synthesis/);
   repository.close();
@@ -529,7 +529,7 @@ test('research stages persist completed and not-applicable state across restarts
   const restored = repository.loadState().project.stageGraph;
   assert.equal(restored.currentStageKey, 'inquiry');
   assert.equal(restored.stages[0].status, 'completed');
-  assert.equal(restored.stages[1].status, 'not_applicable');
+  assert.equal(restored.stages[1].status, 'not-applicable');
   assert.equal(restored.stages[1].notApplicableReason, 'This manuscript uses only project-generated simulation data.');
   assert.equal(restored.progress.completed, 1);
   assert.equal(restored.progress.notApplicable, 1);
@@ -560,9 +560,9 @@ test('research stage state is project-scoped and completed stages can be revisit
   assert.equal(original.stageGraph.currentStageKey, 'inquiry');
   assert.equal(original.stageGraph.stages[1].status, 'completed');
 
-  repository.reopenResearchStage('scoping');
+  repository.reopenResearchStage('evidence');
   const reopened = repository.loadState().project.stageGraph;
-  assert.equal(reopened.currentStageKey, 'scoping');
+  assert.equal(reopened.currentStageKey, 'evidence');
   assert.equal(reopened.currentStage.isCompleted, true);
   assert.deepEqual(reopened.nextAction.allowedActions, ['complete']);
 
@@ -581,5 +581,27 @@ test('research stage mutations reject invalid transitions and missing skip reaso
   assert.throws(() => repository.completeResearchStage('evidence'), /当前阶段/);
   assert.throws(() => repository.completeResearchStage('unknown'), /阶段/);
   assert.throws(() => repository.markResearchStageNotApplicable({ stageKey: 'scoping', reason: '   ' }), /原因/);
-  assert.throws(() => repository.reopenResearchStage('scoping'), /完成/);
+  assert.throws(() => repository.reopenResearchStage('scoping'), /Evidence/);
+});
+
+test('the complete stage graph reaches a durable terminal state', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  for (const key of ['scoping', 'evidence', 'inquiry', 'synthesis', 'manuscript', 'release']) {
+    repository.completeResearchStage(key);
+  }
+  assert.equal(repository.loadState().project.stageGraph.currentStageKey, null);
+  assert.equal(repository.loadState().project.stageGraph.progress.completed, 6);
+  repository.close();
+
+  repository = openTestRepository(databasePath);
+  const restored = repository.loadState().project.stageGraph;
+  assert.equal(restored.currentStageKey, null);
+  assert.equal(restored.stages.every((stage) => stage.status === 'completed'), true);
+  assert.equal(restored.nextAction.type, 'complete');
 });

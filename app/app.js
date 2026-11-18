@@ -510,7 +510,7 @@ function stageMutationBusy() {
 
 function stageStatusText(stage) {
   if (stage.isCurrent) return stage.isCompleted ? '当前阶段 · 复核中' : '当前阶段';
-  if (stage.isCompleted) return '已完成 · 可重新进入';
+  if (stage.isCompleted) return stage.canReopen ? '已完成 · 可重新进入' : '已完成';
   if (stage.isNotApplicable) return '不适用';
   return '已锁定';
 }
@@ -536,7 +536,9 @@ function renderResearchStages() {
       : stage.isCurrent
         ? stage.description
         : stage.isCompleted
-          ? '点击可重新进入该阶段并开展迭代复核。'
+          ? stage.canReopen
+            ? '点击可重新进入该阶段并开展迭代复核。'
+            : '该阶段已完成并冻结。'
           : stage.lockReason;
     const stateIcon = stage.isCurrent
       ? '<span class="stage-current-pip" aria-hidden="true"></span>'
@@ -560,7 +562,7 @@ function renderResearchStages() {
   if (graph.nextAction.allowedActions.includes('complete')) {
     actions.push(`<button type="button" class="stage-primary-action" data-stage-action="complete"${busy ? ' disabled' : ''}>${escapeHTML(graph.nextAction.label)}</button>`);
   }
-  if (graph.nextAction.allowedActions.includes('not_applicable')) {
+  if (graph.nextAction.allowedActions.includes('not-applicable')) {
     actions.push(`<button type="button" class="stage-secondary-action" data-stage-action="not-applicable"${busy ? ' disabled' : ''}>标记不适用</button>`);
   }
   els.projectStageActions.innerHTML = actions.join('');
@@ -595,7 +597,10 @@ function reopenCompletedResearchStage(stageKey) {
     return;
   }
   const stage = activeResearchStageGraph()?.stages.find((item) => item.key === stageKey);
-  if (!stage?.isCompleted) return;
+  if (!stage?.canReopen) {
+    if (stage?.isCompleted) showToast(`${stage.englishLabel} 已完成并冻结。`);
+    return;
+  }
   void applyResearchStageProductState(
     () => bridge.projectStageReopen(stageKey),
     `已重新进入 ${stage.englishLabel}；现有完成记录会保留。`,
@@ -1604,7 +1609,8 @@ function bindEvents() {
     if (!stage) return;
     if (stage.isCurrent) return;
     if (stage.isCompleted) {
-      reopenCompletedResearchStage(stage.key);
+      if (stage.canReopen) reopenCompletedResearchStage(stage.key);
+      else showToast(`${stage.englishLabel} 已完成并冻结。`);
       return;
     }
     if (stage.isNotApplicable) {

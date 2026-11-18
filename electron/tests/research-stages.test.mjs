@@ -25,7 +25,7 @@ test('the initial stage graph exposes the six ordered research stages and a conc
   assert.equal(graph.stages[1].status, 'pending');
   assert.equal(graph.stages[1].isLocked, true);
   assert.match(graph.stages[1].lockReason, /Scoping/);
-  assert.deepEqual(graph.nextAction.allowedActions, ['complete', 'not_applicable']);
+  assert.deepEqual(graph.nextAction.allowedActions, ['complete', 'not-applicable']);
   assert.match(graph.nextAction.description, /Evidence/);
 });
 
@@ -56,25 +56,39 @@ test('a stage can be explicitly skipped only with a recorded reason', () => {
   const graph = buildResearchStageGraph(skipped);
 
   assert.equal(graph.currentStageKey, 'inquiry');
-  assert.equal(graph.stages[1].status, 'not_applicable');
+  assert.equal(graph.stages[1].status, 'not-applicable');
   assert.equal(graph.stages[1].notApplicableReason, 'No external evidence is available.');
   assert.equal(graph.stages[1].isLocked, false);
 });
 
-test('completed stages can be re-entered without erasing later completed stages', () => {
+test('iterative stages can be re-entered without erasing completed records', () => {
   let state = completeResearchStage(createInitialResearchStageState(), 'scoping', { completedAt: timestamp });
   state = completeResearchStage(state, 'evidence', { completedAt: timestamp });
-  state = reopenResearchStage(state, 'scoping', { reopenedAt: timestamp });
+  state = reopenResearchStage(state, 'evidence', { reopenedAt: timestamp });
 
   let graph = buildResearchStageGraph(state);
-  assert.equal(graph.currentStageKey, 'scoping');
+  assert.equal(graph.currentStageKey, 'evidence');
   assert.equal(graph.currentStage.isCompleted, true);
-  assert.equal(graph.nextAction.allowedActions.includes('not_applicable'), false);
+  assert.equal(graph.stages[1].canReopen, true);
+  assert.equal(graph.nextAction.allowedActions.includes('not-applicable'), false);
 
-  state = completeResearchStage(state, 'scoping', { completedAt: timestamp });
+  state = completeResearchStage(state, 'evidence', { completedAt: timestamp });
   graph = buildResearchStageGraph(state);
   assert.equal(graph.currentStageKey, 'inquiry');
   assert.equal(graph.stages[1].status, 'completed');
+});
+
+test('all six stages can reach a terminal graph', () => {
+  let state = createInitialResearchStageState();
+  for (const key of ['scoping', 'evidence', 'inquiry', 'synthesis', 'manuscript', 'release']) {
+    state = completeResearchStage(state, key, { completedAt: timestamp });
+  }
+
+  const graph = buildResearchStageGraph(normalizeResearchStageState(JSON.parse(JSON.stringify(state))));
+  assert.equal(graph.currentStageKey, null);
+  assert.equal(graph.stages.every((stage) => stage.status === 'completed'), true);
+  assert.deepEqual(graph.nextAction.allowedActions, []);
+  assert.equal(graph.nextAction.type, 'complete');
 });
 
 test('out-of-order and unknown stage mutations are rejected', () => {
@@ -82,5 +96,5 @@ test('out-of-order and unknown stage mutations are rejected', () => {
 
   assert.throws(() => completeResearchStage(initial, 'evidence', { completedAt: timestamp }), /当前阶段/);
   assert.throws(() => completeResearchStage(initial, 'not-a-stage', { completedAt: timestamp }), /阶段/);
-  assert.throws(() => reopenResearchStage(initial, 'scoping', { reopenedAt: timestamp }), /完成/);
+  assert.throws(() => reopenResearchStage(initial, 'scoping', { reopenedAt: timestamp }), /Evidence/);
 });
