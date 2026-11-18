@@ -139,6 +139,10 @@ export function normalizeResearchStageState(value) {
   )) {
     currentStageKey = firstUnresolvedStageKey(stages);
   }
+  if (currentStageKey && stages[currentStageKey]?.status !== 'completed') {
+    // A non-terminal current stage invalidates every downstream completion record.
+    for (const stage of RESEARCH_STAGES.slice(stageIndex(currentStageKey))) delete stages[stage.key];
+  }
   if (!currentStageKey) currentStageKey = null;
 
   return { currentStageKey, stages };

@@ -632,3 +632,38 @@ test('corrupt stage records cannot leave a later stage current without its prere
   assert.equal(graph.stages[5].status, 'pending');
   assert.match(graph.stages[5].lockReason, /Scoping/);
 });
+
+test('partial stage records recover to a coherent ordered graph', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const first = openTestRepository(databasePath);
+  const projectId = first.loadState().activeProjectId;
+  first.close();
+
+  const timestamp = '2026-11-18T10:00:00.000Z';
+  const partialStages = {
+    scoping: { status: 'completed', updatedAt: timestamp, completedAt: timestamp, notApplicableReason: null },
+    manuscript: { status: 'completed', updatedAt: timestamp, completedAt: timestamp, notApplicableReason: null },
+    release: { status: 'completed', updatedAt: timestamp, completedAt: timestamp, notApplicableReason: null },
+  };
+  const database = new DatabaseSync(databasePath);
+  database.prepare(`
+    UPDATE projects
+    SET current_stage_key = 'release', research_stage_states_json = ?
+    WHERE id = ?
+  `).run(JSON.stringify(partialStages), projectId);
+  database.close();
+
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const graph = repository.loadState().project.stageGraph;
+  assert.equal(graph.currentStageKey, 'evidence');
+  assert.equal(graph.stages[0].status, 'completed');
+  assert.equal(graph.stages[1].status, 'current');
+  assert.equal(graph.stages[4].status, 'pending');
+  assert.equal(graph.stages[5].status, 'pending');
+  assert.match(graph.stages[4].lockReason, /Evidence/);
+});
