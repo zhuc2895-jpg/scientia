@@ -1197,6 +1197,7 @@ function handleAgentEvent(event) {
   if (event.type === 'daemon_status') {
     state.daemon = event;
     applyRuntimeState();
+    renderResearchStages();
     return;
   }
   const run = state.activeRun;
