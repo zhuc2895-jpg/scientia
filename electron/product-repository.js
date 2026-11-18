@@ -128,11 +128,6 @@ export function openProductRepository({ databasePath }) {
     FROM projects
     ORDER BY (archived_at IS NOT NULL) ASC, updated_at DESC, id ASC
   `);
-  const selectFirstUnarchivedProject = database.prepare(`
-    SELECT id, name, workspace_path, workspace_kind, created_at, updated_at, archived_at
-    FROM projects WHERE archived_at IS NULL
-    ORDER BY updated_at DESC, id ASC LIMIT 1
-  `);
   const updateProjectWorkspace = database.prepare(`
     UPDATE projects SET workspace_path = ?, workspace_kind = ?, updated_at = ? WHERE id = ?
   `);
@@ -149,6 +144,10 @@ export function openProductRepository({ databasePath }) {
 
   function assertOpen() {
     if (closed) throw new Error('产品数据库已关闭。');
+  }
+
+  function isBoundResearchProjectRow(row) {
+    return typeof row?.workspace_path === 'string' && row.workspace_path.trim() !== '';
   }
 
   function serializeProject(row) {
@@ -169,19 +168,23 @@ export function openProductRepository({ databasePath }) {
     return selectProject.get(id) || null;
   }
 
+  function findFirstUnarchivedBoundResearchProjectRow() {
+    return selectProjects.all().find((row) => !row.archived_at && isBoundResearchProjectRow(row)) || null;
+  }
+
   function getActiveProjectRow({ persist = true } = {}) {
     const requestedId = selectActiveState.get(ACTIVE_PROJECT_KEY)?.value || null;
     const requested = getProjectRow(requestedId);
-    if (requested && !requested.archived_at) return requested;
+    if (requested && !requested.archived_at && isBoundResearchProjectRow(requested)) return requested;
 
-    const fallback = selectFirstUnarchivedProject.get() || null;
+    const fallback = findFirstUnarchivedBoundResearchProjectRow();
     if (persist && (fallback?.id || null) !== requestedId) setAppState.run(ACTIVE_PROJECT_KEY, fallback?.id || null);
     return fallback;
   }
 
   function assertActiveProject() {
     const row = getActiveProjectRow();
-    if (!row?.workspace_path) throw new Error('Research Project 尚未绑定研究工作区。');
+    if (!row?.workspace_path) throw new Error('Research Project 尚未绑定 Research Workspace。');
     return row;
   }
 
@@ -209,18 +212,18 @@ export function openProductRepository({ databasePath }) {
   function assertWorkspaceAvailable(workspacePath, { exceptProjectId = null } = {}) {
     const conflict = selectProjects.all().find((row) => (
       row.id !== exceptProjectId
-      && row.workspace_path
+      && isBoundResearchProjectRow(row)
       && (isWithin(row.workspace_path, workspacePath) || isWithin(workspacePath, row.workspace_path))
     ));
     if (conflict) throw new Error(`该 Research Workspace 与现有 Research Project“${conflict.name}”的目录重叠。`);
   }
 
-  function initializeDefaultProject({ workspacePath }) {
+  function bindPendingBootstrapResearchProject({ workspacePath }) {
     assertOpen();
     if (typeof workspacePath !== 'string' || !path.isAbsolute(workspacePath)) throw new Error('Research Workspace 必须是绝对路径。');
     const row = getProjectRow(DEFAULT_PROJECT_ID);
     if (!row) throw new Error('默认 Research Project 不存在。');
-    if (!row.workspace_path) {
+    if (!isBoundResearchProjectRow(row)) {
       assertWorkspaceAvailable(workspacePath, { exceptProjectId: DEFAULT_PROJECT_ID });
       updateProjectWorkspace.run(workspacePath.trim(), 'imported', new Date().toISOString(), DEFAULT_PROJECT_ID);
     }
@@ -230,8 +233,9 @@ export function openProductRepository({ databasePath }) {
 
   function loadState() {
     assertOpen();
-    const projects = selectProjects.all().map(serializeProject);
+    const projects = selectProjects.all().filter(isBoundResearchProjectRow).map(serializeProject);
     const activeRow = getActiveProjectRow();
+    const pendingBootstrapRow = getProjectRow(DEFAULT_PROJECT_ID);
     const activeProjectId = activeRow?.id || null;
     const conversations = activeRow ? selectConversations.all(activeRow.id).map(deserializeConversation) : [];
     const requestedActiveId = activeRow ? activeConversationId(activeRow.id) : null;
@@ -247,6 +251,7 @@ export function openProductRepository({ databasePath }) {
       conversations,
       activeId,
       migrationComplete,
+      requiresResearchWorkspaceBinding: !activeRow && Boolean(pendingBootstrapRow && !isBoundResearchProjectRow(pendingBootstrapRow)),
     };
   }
 
@@ -292,7 +297,7 @@ export function openProductRepository({ databasePath }) {
     try {
       archiveProject.run(timestamp, timestamp, id);
       if (selectActiveState.get(ACTIVE_PROJECT_KEY)?.value === id) {
-        const next = selectFirstUnarchivedProject.get();
+        const next = findFirstUnarchivedBoundResearchProjectRow();
         setAppState.run(ACTIVE_PROJECT_KEY, next?.id || null);
       }
       database.exec('COMMIT');
@@ -331,7 +336,7 @@ export function openProductRepository({ databasePath }) {
       deleteProjectConversations.run(id);
       deleteProject.run(id);
       if (selectActiveState.get(ACTIVE_PROJECT_KEY)?.value === id) {
-        const next = selectFirstUnarchivedProject.get();
+        const next = findFirstUnarchivedBoundResearchProjectRow();
         setAppState.run(ACTIVE_PROJECT_KEY, next?.id || null);
       }
       database.exec('COMMIT');
@@ -344,7 +349,18 @@ export function openProductRepository({ databasePath }) {
 
   function getProject(id) {
     assertOpen();
-    return serializeProject(getProjectRow(id));
+    const row = getProjectRow(id);
+    return isBoundResearchProjectRow(row) ? serializeProject(row) : null;
+  }
+
+  function getActiveResearchWorkspacePath() {
+    assertOpen();
+    return getActiveProjectRow()?.workspace_path || '';
+  }
+
+  function getBoundResearchWorkspacePaths() {
+    assertOpen();
+    return selectProjects.all().filter(isBoundResearchProjectRow).map((row) => row.workspace_path);
   }
 
   function getConversationProjectId(id) {
@@ -472,8 +488,10 @@ export function openProductRepository({ databasePath }) {
   return {
     loadState,
     getProject,
+    getActiveResearchWorkspacePath,
+    getBoundResearchWorkspacePaths,
     getConversationProjectId,
-    initializeDefaultProject,
+    bindPendingBootstrapResearchProject,
     createProject,
     setActiveProject,
     archiveProject: archiveProjectRecord,

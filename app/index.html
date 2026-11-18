@@ -351,7 +351,10 @@
         <div class="field-help">使用 OpenAI 兼容代理时填写；留空则使用 DeepSeek 官方路由。</div>
 
         <label class="field-label" for="settings-workspace-path">当前 Research Workspace</label>
-        <input id="settings-workspace-path" type="text" readonly>
+        <div class="workspace-picker">
+          <input id="settings-workspace-path" type="text" readonly>
+          <button type="button" class="secondary-button" id="choose-settings-research-workspace">选择目录</button>
+        </div>
         <div class="field-help">Research Workspace 在 Research Project 创建时确定，之后不可更换。Harness 只会在此目录读取资料并将产出写入 <code>.science/outputs/</code>。</div>
 
         <div class="security-note">

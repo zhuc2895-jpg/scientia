@@ -14,7 +14,7 @@ function temporaryDatabase() {
 
 function openTestRepository(databasePath) {
   const repository = openProductRepository({ databasePath });
-  repository.initializeDefaultProject({ workspacePath: 'C:/Research/Test Project' });
+  repository.bindPendingBootstrapResearchProject({ workspacePath: 'C:/Research/Test Project' });
   return repository;
 }
 
@@ -189,7 +189,7 @@ test('conversations require a workspace-bound project', (t) => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  assert.throws(() => repository.createConversation(conversation()), /尚未绑定研究工作区/);
+  assert.throws(() => repository.createConversation(conversation()), /尚未绑定 Research Workspace/);
 });
 
 test('projects own isolated conversations and each project keeps its own active conversation', (t) => {
@@ -396,7 +396,7 @@ test('legacy active conversation is scoped to its project before another project
 test('deleting the bootstrapped default project is durable across repository restarts', (t) => {
   const { directory, databasePath } = temporaryDatabase();
   let repository = openProductRepository({ databasePath });
-  repository.initializeDefaultProject({ workspacePath: 'C:/Research/Default-Project' });
+  repository.bindPendingBootstrapResearchProject({ workspacePath: 'C:/Research/Default-Project' });
   const defaultProject = repository.loadState().project;
   repository.deleteProject({
     id: defaultProject.id,
@@ -437,4 +437,61 @@ test('project deletion requires the exact project name and removes only project-
   assert.notEqual(repository.loadState().activeProjectId, project.id);
   assert.equal(repository.loadState().projects.some((item) => item.id === project.id), false);
   assert.equal(repository.loadState().conversations.length, 0);
+});
+
+test('the pending bootstrap record is not exposed as a Research Project', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openProductRepository({ databasePath });
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const pendingState = repository.loadState();
+
+  assert.equal(pendingState.requiresResearchWorkspaceBinding, true);
+  assert.equal(pendingState.activeProjectId, null);
+  assert.deepEqual(pendingState.projects, []);
+  assert.equal(repository.getProject('scientia-default-project'), null);
+});
+
+test('the repository exposes canonical and protected Research Workspace paths', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const alpha = repository.loadState().project;
+  const beta = repository.createProject({
+    id: 'research-project-beta',
+    name: 'Beta',
+    workspacePath: 'C:/Research/Beta',
+    workspaceKind: 'imported',
+  });
+
+  assert.equal(repository.getActiveResearchWorkspacePath(), beta.workspacePath);
+  assert.deepEqual(
+    new Set(repository.getBoundResearchWorkspacePaths()),
+    new Set([alpha.workspacePath, beta.workspacePath]),
+  );
+});
+
+test('whitespace-only Research Workspace paths are unbound in queries and lookups', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openProductRepository({ databasePath });
+  t.after(() => {
+    repository?.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  repository.close();
+  const database = new DatabaseSync(databasePath);
+  database.prepare("UPDATE projects SET workspace_path = '   ' WHERE id = 'scientia-default-project'").run();
+  database.close();
+  repository = openProductRepository({ databasePath });
+
+  const state = repository.loadState();
+  assert.equal(state.requiresResearchWorkspaceBinding, true);
+  assert.deepEqual(state.projects, []);
+  assert.equal(repository.getProject('scientia-default-project'), null);
 });

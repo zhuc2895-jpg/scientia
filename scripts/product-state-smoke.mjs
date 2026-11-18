@@ -24,6 +24,16 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function pollUntil(probe, predicate = Boolean) {
+  let value;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    value = await probe();
+    if (predicate(value)) return value;
+    await delay(100);
+  }
+  return value;
+}
+
 async function availablePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -129,6 +139,21 @@ async function waitForRenderer(cdp) {
     await delay(100);
   }
   throw new Error('Renderer application did not become ready.');
+}
+
+async function waitForActiveResearchProject(cdp, { id = null, name }) {
+  const state = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (value) => value.project?.name === name && (!id || value.activeProjectId === id),
+  );
+  assert.equal(state.project.name, name);
+  if (id) assert.equal(state.activeProjectId, id);
+  const label = await pollUntil(
+    () => evaluate(cdp, `document.querySelector('.project-item.active .project-item-name')?.textContent || ''`),
+    (value) => value === name,
+  );
+  assert.equal(label, name);
+  return state;
 }
 
 async function waitForActiveConversation(cdp, conversationId) {
@@ -271,26 +296,22 @@ try {
     document.querySelector('#create-project').click();
     return true;
   })()`);
-  let managedState = null;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    managedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
-    if (managedState.activeProjectId !== initialProjectId && managedState.projects.length === existingProjectCount + 1) break;
-    await delay(100);
-  }
+  const managedState = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (state) => state.activeProjectId !== initialProjectId && state.projects.length === existingProjectCount + 1,
+  );
   const managedProject = managedState.projects.find((project) => !existingProjectIds.includes(project.id));
   assert.ok(managedProject, 'managed project was not created');
   assert.equal(managedState.activeProjectId, managedProject.id);
   assert.equal(managedProject.workspaceKind, 'managed');
   assert.equal(managedProject.workspacePath.startsWith(path.join(userData, 'managed-workspaces')), true);
   assert.equal(managedState.conversations.length, 0);
-  let activeProjectLabel = '';
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    activeProjectLabel = await evaluate(cdp, `document.querySelector('.project-item.active .project-item-name')?.textContent || ''`);
-    if (activeProjectLabel === 'Managed Project Smoke') break;
-    await delay(100);
-  }
+  const activeProjectLabel = await pollUntil(
+    () => evaluate(cdp, `document.querySelector('.project-item.active .project-item-name')?.textContent || ''`),
+    (label) => label === 'Managed Project Smoke',
+  );
   assert.equal(activeProjectLabel, 'Managed Project Smoke');
-  console.log('OK   A managed Research Project creates its own workspace and becomes the navigation root');
+  console.log('OK   A managed Research Project creates its own Research Workspace and becomes the navigation root');
 
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);
@@ -306,61 +327,53 @@ try {
   }).then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message }))`);
   assert.equal(crossProjectRun.ok, false);
   assert.match(crossProjectRun.message, /当前 Research Project/);
-  console.log('OK   A Project cannot inspect or run another Project workspace');
+  console.log('OK   A Research Project cannot inspect or run another Research Workspace');
 
   await evaluate(cdp, `document.querySelector('[data-project-id="${initialProjectId}"]').click()`);
-  let switchedState = null;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    switchedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
-    if (switchedState.activeProjectId === initialProjectId) break;
-    await delay(100);
-  }
+  let switchedState = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (state) => state.activeProjectId === initialProjectId,
+  );
   assert.equal(switchedState.activeProjectId, initialProjectId);
   assert.equal(switchedState.activeId, expectedId);
   assert.equal(switchedState.conversations.length, 1);
-  let activeWorkspace = '';
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    activeWorkspace = (await evaluate(cdp, 'window.scienceAgent.configLoad()')).workspace;
-    if (activeWorkspace === workspace) break;
-    await delay(100);
-  }
+  const activeWorkspace = await pollUntil(
+    async () => (await evaluate(cdp, 'window.scienceAgent.configLoad()')).workspace,
+    (value) => value === workspace,
+  );
   assert.equal(activeWorkspace, workspace);
-  console.log('OK   Switching Projects changes the active workspace and conversation scope');
+  console.log('OK   Switching Research Projects changes the active Research Workspace and Conversation scope');
 
   await evaluate(cdp, `window.confirm = () => true; document.querySelector('[data-archive-project="${managedProject.id}"]').click()`);
-  let archivedState = null;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    archivedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
-    if (archivedState.projects.some((project) => project.id === managedProject.id && project.archivedAt)) break;
-    await delay(100);
-  }
+  const archivedState = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (state) => state.projects.some((project) => project.id === managedProject.id && project.archivedAt),
+  );
   assert.equal(archivedState.projects.find((project) => project.id === managedProject.id).archivedAt !== null, true);
-  assert.equal(await evaluate(cdp, `Boolean(document.querySelector('[data-restore-project="${managedProject.id}"]'))`), true);
+  const restoreControlReady = await pollUntil(
+    () => evaluate(cdp, `Boolean(document.querySelector('[data-restore-project="${managedProject.id}"]'))`),
+  );
+  assert.equal(restoreControlReady, true);
   assert.equal((await evaluate(cdp, 'window.scienceAgent.productStateLoad()')).conversations.length, 1);
-  console.log('OK   Project archive is reversible and preserves project data');
+  console.log('OK   Research Project Archival is reversible and preserves Research Project data');
 
   await evaluate(cdp, `document.querySelector('[data-restore-project="${managedProject.id}"]').click()`);
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    switchedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
-    if (switchedState.projects.find((project) => project.id === managedProject.id)?.archivedAt === null) break;
-    await delay(100);
-  }
+  switchedState = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (state) => state.projects.find((project) => project.id === managedProject.id)?.archivedAt === null,
+  );
   assert.equal(switchedState.activeProjectId, initialProjectId);
   assert.equal(switchedState.projects.find((project) => project.id === managedProject.id).archivedAt, null);
-  let restoredProjectControlReady = false;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    restoredProjectControlReady = await evaluate(cdp, `Boolean(document.querySelector('[data-project-id="${managedProject.id}"]'))`);
-    if (restoredProjectControlReady) break;
-    await delay(100);
-  }
+  const restoredProjectControlReady = await pollUntil(
+    () => evaluate(cdp, `Boolean(document.querySelector('[data-project-id="${managedProject.id}"]'))`),
+  );
   assert.equal(restoredProjectControlReady, true);
 
   await evaluate(cdp, `document.querySelector('[data-project-id="${managedProject.id}"]').click()`);
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    switchedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
-    if (switchedState.activeProjectId === managedProject.id) break;
-    await delay(100);
-  }
+  switchedState = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (state) => state.activeProjectId === managedProject.id,
+  );
   assert.equal(switchedState.activeProjectId, managedProject.id);
   assert.equal(switchedState.conversations.length, 1);
 
@@ -368,19 +381,18 @@ try {
   await delay(250);
   assert.equal((await evaluate(cdp, 'window.scienceAgent.productStateLoad()')).projects.some((project) => project.id === managedProject.id), true);
   await evaluate(cdp, `window.prompt = () => 'Managed Project Smoke'; document.querySelector('[data-delete-project="${managedProject.id}"]').click()`);
-  let deletedState = null;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    deletedState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
-    if (!deletedState.projects.some((project) => project.id === managedProject.id)) break;
-    await delay(100);
-  }
+  const deletedState = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (state) => !state.projects.some((project) => project.id === managedProject.id),
+  );
   assert.equal(deletedState.projects.some((project) => project.id === managedProject.id), false);
   assert.equal(deletedState.activeProjectId, initialProjectId);
-  for (let attempt = 0; attempt < 50 && existsSync(managedProject.workspacePath); attempt += 1) {
-    await delay(100);
-  }
-  assert.equal(existsSync(managedProject.workspacePath), false);
-  console.log('OK   Project deletion requires the exact name and removes its managed workspace');
+  const researchWorkspaceStillExists = await pollUntil(
+    () => existsSync(managedProject.workspacePath),
+    (exists) => !exists,
+  );
+  assert.equal(researchWorkspaceStillExists, false);
+  console.log('OK   Research Project deletion requires the exact name and removes its managed Research Workspace');
 
   await evaluate(cdp, `document.querySelector('#new-research').click()`);
   await delay(250);
@@ -514,7 +526,59 @@ try {
   await waitForRenderer(cdp);
   const repairedConfig = await evaluate(cdp, 'window.scienceAgent.configLoad()');
   assert.equal(repairedConfig.workspace, migratedState.project.workspacePath);
-  console.log('OK   The project workspace remains canonical across config writes');
+  console.log('OK   The Research Workspace remains canonical across config writes');
+
+  await stopApp();
+  writeFileSync(configPath, '{ broken json', 'utf8');
+  cdp = await connect(await launchApp());
+  await waitForRenderer(cdp);
+  const stateAfterCorruptConfig = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+  assert.equal(stateAfterCorruptConfig.activeProjectId, migratedState.activeProjectId);
+  assert.equal(stateAfterCorruptConfig.project.workspacePath, migratedState.project.workspacePath);
+  console.log('OK   Corrupt derived config does not hide canonical Research Project state');
+
+  const corruptConfigProjectName = 'Research Project Created With Corrupt Config';
+  await evaluate(cdp, `document.querySelector('#add-project').click(); (() => {
+    document.querySelector('#project-name').value = ${JSON.stringify(corruptConfigProjectName)};
+    document.querySelector('#create-project').click();
+    return true;
+  })()`);
+  await waitForActiveResearchProject(cdp, { name: corruptConfigProjectName });
+
+  await evaluate(cdp, `document.querySelector('[data-project-id="${migratedState.activeProjectId}"]').click()`);
+  await waitForActiveResearchProject(cdp, {
+    id: migratedState.activeProjectId,
+    name: migratedState.project.name,
+  });
+  console.log('OK   Research Project mutations remain usable with corrupt derived config');
+
+  await stopApp();
+  for (const databaseFile of await findProductDatabaseFiles(userData)) rmSync(databaseFile, { force: true });
+  writeFileSync(configPath, '{ still broken', 'utf8');
+  cdp = await connect(await launchApp());
+  await waitForRenderer(cdp);
+  const pendingState = await evaluate(cdp, 'window.scienceAgent.productStateLoad()');
+  assert.equal(pendingState.requiresResearchWorkspaceBinding, true);
+  assert.deepEqual(pendingState.projects, []);
+  assert.equal(await evaluate(cdp, `Boolean(document.querySelector('#choose-settings-research-workspace'))`), true);
+  const recoveredWorkspace = path.join(userData, 'recovered-research-workspace');
+  await evaluate(cdp, `(() => {
+    document.querySelector('#settings-workspace-path').value = ${JSON.stringify(recoveredWorkspace)};
+    document.querySelector('#settings-form').requestSubmit();
+    return true;
+  })()`);
+  const boundState = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.productStateLoad()'),
+    (state) => state.project?.workspacePath === recoveredWorkspace,
+  );
+  assert.equal(boundState.requiresResearchWorkspaceBinding, false);
+  assert.equal(boundState.project.name, 'Research Project');
+  const recoveredConfig = await pollUntil(
+    () => evaluate(cdp, 'window.scienceAgent.configLoad()'),
+    (config) => config.workspace === recoveredWorkspace,
+  );
+  assert.equal(recoveredConfig.workspace, recoveredWorkspace);
+  console.log('OK   Explicit save binds a pending Research Project and repairs derived config');
 } finally {
   await stopApp();
   rmSync(userData, { recursive: true, force: true });

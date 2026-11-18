@@ -32,6 +32,7 @@ const state = {
   evidenceMode: localStorage.getItem(UI_KEY + '.evidence') !== 'off',
   activeRun: null,
   workspace: null,
+  requiresResearchWorkspaceBinding: false,
   search: '',
   toastTimer: null,
   elapsedTimer: null,
@@ -83,7 +84,7 @@ const els = {
   projectName: $('#project-name'),
   projectImportFields: $('#project-import-fields'),
   projectWorkspacePath: $('#project-workspace-path'),
-  createProject: $('#create-project'),
+  createResearchProjectButton: $('#create-project'),
   settingsDialog: $('#settings-dialog'),
   settingsForm: $('#settings-form'),
   settingsStatus: $('#settings-status'),
@@ -94,6 +95,7 @@ const els = {
   maxTokens: $('#max-tokens'),
   baseUrl: $('#base-url'),
   workspacePathInput: $('#settings-workspace-path'),
+  chooseSettingsResearchWorkspace: $('#choose-settings-research-workspace'),
   saveSettings: $('#save-settings'),
   toast: $('#toast'),
 };
@@ -198,7 +200,7 @@ function activeConversation() {
   return state.conversations.find((item) => item.id === state.activeId) || null;
 }
 
-function activeProject() {
+function activeResearchProject() {
   return state.projects.find((item) => item.id === state.activeProjectId) || state.project || null;
 }
 
@@ -208,6 +210,7 @@ function applyProductState(productState) {
   state.project = productState?.project || null;
   state.conversations = Array.isArray(productState?.conversations) ? productState.conversations : [];
   state.activeId = productState?.activeId || null;
+  state.requiresResearchWorkspaceBinding = Boolean(productState?.requiresResearchWorkspaceBinding);
   if (state.config) {
     state.config = { ...state.config, workspace: state.project?.workspacePath || '' };
   }
@@ -394,7 +397,7 @@ function conversationGroupLabel(dateValue) {
   return '更早';
 }
 
-function projectItemMarkup(project, { archived = false } = {}) {
+function researchProjectItemMarkup(project, { archived = false } = {}) {
   const selected = project.id === state.activeProjectId && !archived;
   const workspaceName = basename(project.workspacePath || '') || '未绑定目录';
   const kind = project.workspaceKind === 'managed' ? '托管' : '导入';
@@ -414,7 +417,7 @@ function projectItemMarkup(project, { archived = false } = {}) {
     </div>`;
 }
 
-function renderProjectList() {
+function renderResearchProjectList() {
   const unarchivedProjects = state.projects.filter((project) => !project.archivedAt);
   const archivedProjects = state.projects.filter((project) => project.archivedAt);
   if (!unarchivedProjects.length && !archivedProjects.length) {
@@ -422,10 +425,10 @@ function renderProjectList() {
     return;
   }
   els.projectList.innerHTML = [
-    ...unarchivedProjects.map((project) => projectItemMarkup(project)),
+    ...unarchivedProjects.map((project) => researchProjectItemMarkup(project)),
     ...(archivedProjects.length ? [
       '<div class="project-archive-divider">Archived Research Projects</div>',
-      ...archivedProjects.map((project) => projectItemMarkup(project, { archived: true })),
+      ...archivedProjects.map((project) => researchProjectItemMarkup(project, { archived: true })),
     ] : []),
   ].join('');
 }
@@ -466,7 +469,7 @@ function renderConversationList() {
 
 function renderHeader() {
   const conversation = activeConversation();
-  const project = activeProject();
+  const project = activeResearchProject();
   els.conversationTitle.textContent = conversation?.title || '新的研究';
   els.deleteConversation.style.visibility = conversation ? 'visible' : 'hidden';
   const workspace = state.config?.workspace || project?.workspacePath || '';
@@ -636,7 +639,7 @@ function renderWorkspace() {
 
   const files = workspace?.recent || [];
   if (!files.length) {
-    els.recentFiles.innerHTML = '<div class="file-empty">工作区还是空的。导入资料或将文件放入研究目录。</div>';
+    els.recentFiles.innerHTML = '<div class="file-empty">Research Workspace 还是空的。导入资料或将文件放入 Research Workspace。</div>';
     return;
   }
   els.recentFiles.innerHTML = files.map((file) => `
@@ -709,7 +712,7 @@ function renderAll() {
   if (els.researchMode) els.researchMode.value = activeConversation()?.researchMode || 'auto';
   renderAppTabs();
   renderGreeting();
-  renderProjectList();
+  renderResearchProjectList();
   renderConversationList();
   renderHeader();
   renderMessages();
@@ -718,7 +721,7 @@ function renderAll() {
   renderPendingAttachments();
   applyRuntimeState();
 }
-function openProjectDialog() {
+function openResearchProjectDialog() {
   state.pendingProjectImport = null;
   els.projectForm.reset();
   els.projectName.value = '';
@@ -728,15 +731,15 @@ function openProjectDialog() {
   requestAnimationFrame(() => els.projectName.focus());
 }
 
-function closeProjectDialog() {
+function closeResearchProjectDialog() {
   if (els.projectDialog.open) els.projectDialog.close();
 }
 
-function selectedProjectMode() {
+function selectedResearchProjectMode() {
   return $('input[name="project-mode"]:checked', els.projectForm)?.value || 'managed';
 }
 
-async function chooseProjectImport() {
+async function chooseResearchProjectImport() {
   try {
     const selected = await bridge.projectPickImport();
     if (!selected) return false;
@@ -745,12 +748,12 @@ async function chooseProjectImport() {
     if (!els.projectName.value.trim()) els.projectName.value = selected.suggestedName || '';
     return true;
   } catch (error) {
-    showToast(error.message || '无法选择研究目录。');
+    showToast(error.message || '无法选择 Research Workspace。');
     return false;
   }
 }
 
-async function prepareProjectMutation() {
+async function prepareResearchProjectMutation() {
   if (state.activeRun) {
     showToast('请先停止当前Research Run。');
     return false;
@@ -759,61 +762,70 @@ async function prepareProjectMutation() {
   return true;
 }
 
-async function finishProjectMutation(productState, message) {
+async function finishResearchProjectMutation(productState, message) {
   applyProductState(productState);
   state.pendingAttachments = [];
-  state.config = await bridge.configLoad();
-  state.daemon = state.config?.daemon || state.daemon;
+  try {
+    state.config = await bridge.configLoad();
+    state.daemon = state.config?.daemon || state.daemon;
+  } catch (error) {
+    state.config = {
+      ...state.config,
+      workspace: state.project?.workspacePath || '',
+      harnessInstalled: false,
+      harnessError: error.message,
+    };
+  }
   await recoverActiveProjectRuns();
   renderAll();
   await refreshWorkspace();
   if (message) showToast(message);
 }
 
-async function switchProject(id) {
+async function switchResearchProject(id) {
   if (!id || id === state.activeProjectId) return;
-  if (!await prepareProjectMutation()) return;
+  if (!await prepareResearchProjectMutation()) return;
   try {
     const productState = await bridge.projectActivate(id);
-    await finishProjectMutation(productState);
+    await finishResearchProjectMutation(productState);
   } catch (error) {
     showToast(error.message || '无法切换 Research Project。');
   }
 }
 
-async function archiveProject(id) {
+async function archiveResearchProject(id) {
   const project = state.projects.find((item) => item.id === id);
   if (!project) return;
-  if (!await prepareProjectMutation()) return;
+  if (!await prepareResearchProjectMutation()) return;
   if (!window.confirm(`归档“${project.name}”？Research Project 和已保存内容会保留，可随时恢复。`)) return;
   try {
     const productState = await bridge.projectArchive(id);
-    await finishProjectMutation(productState, 'Research Project 已进入 Project Archival，数据已保留。');
+    await finishResearchProjectMutation(productState, 'Research Project 已进入 Project Archival，数据已保留。');
   } catch (error) {
     showToast(error.message || '无法归档 Research Project。');
   }
 }
 
-async function restoreProject(id) {
-  if (!await prepareProjectMutation()) return;
+async function restoreResearchProject(id) {
+  if (!await prepareResearchProjectMutation()) return;
   try {
     const productState = await bridge.projectRestore(id);
-    await finishProjectMutation(productState, 'Research Project 已恢复。');
+    await finishResearchProjectMutation(productState, 'Research Project 已恢复。');
   } catch (error) {
     showToast(error.message || '无法恢复 Research Project。');
   }
 }
 
-async function deleteProject(id) {
+async function deleteResearchProject(id) {
   const project = state.projects.find((item) => item.id === id);
   if (!project) return;
-  if (!await prepareProjectMutation()) return;
+  if (!await prepareResearchProjectMutation()) return;
   const consequence = project.workspaceKind === 'managed'
-    ? '项目记录和 SCIENTIA 管理的内部工作区都会被删除'
-    : '仅删除 SCIENTIA 中的项目记录，外部研究目录不会被删除';
+    ? 'Research Project 记录和 SCIENTIA 管理的 Research Workspace 都会被删除'
+    : '仅删除 SCIENTIA 中的 Research Project 记录，外部 Research Workspace 不会被删除';
   const confirmationName = window.prompt(
     `删除“${project.name}”不可恢复。${consequence}。
-请输入完整项目名称确认：`,
+请输入完整 Research Project 名称确认：`,
     '',
   );
   if (confirmationName === null) return;
@@ -823,9 +835,9 @@ async function deleteProject(id) {
   }
   try {
     const productState = await bridge.projectDelete({ id, confirmationName });
-    await finishProjectMutation(productState);
-    if (productState.workspaceCleanupWarning) {
-      showToast(`项目已删除，但内部工作区清理失败：${productState.workspaceCleanupWarning}`, 6000);
+    await finishResearchProjectMutation(productState);
+    if (productState.researchWorkspaceCleanupWarning) {
+      showToast(`Research Project 已删除，但 Research Workspace 清理失败：${productState.researchWorkspaceCleanupWarning}`, 6000);
     } else {
       showToast(project.workspaceKind === 'managed' ? 'Research Project 和受管理 Research Workspace 已删除。' : 'Research Project 已删除，外部 Research Workspace 保持不变。');
     }
@@ -834,40 +846,40 @@ async function deleteProject(id) {
   }
 }
 
-async function submitProject(event) {
+async function submitResearchProject(event) {
   event.preventDefault();
-  if (!await prepareProjectMutation()) return;
+  if (!await prepareResearchProjectMutation()) return;
   const name = els.projectName.value.trim();
   if (!name) {
     showToast('请填写 Research Project 名称。');
     els.projectName.focus();
     return;
   }
-  const mode = selectedProjectMode();
+  const mode = selectedResearchProjectMode();
   if (mode === 'imported' && !state.pendingProjectImport) {
-    const selected = await chooseProjectImport();
+    const selected = await chooseResearchProjectImport();
     if (!selected) return;
   }
 
-  els.createProject.disabled = true;
-  els.createProject.textContent = '正在创建…';
+  els.createResearchProjectButton.disabled = true;
+  els.createResearchProjectButton.textContent = '正在创建…';
   try {
     const productState = mode === 'managed'
       ? await bridge.projectCreateManaged({ name })
       : await bridge.projectCreateImported({ name, token: state.pendingProjectImport.token });
-    closeProjectDialog();
-    await finishProjectMutation(productState, 'Research Project 已创建并切换。');
+    closeResearchProjectDialog();
+    await finishResearchProjectMutation(productState, 'Research Project 已创建并切换。');
   } catch (error) {
     showToast(error.message || '无法创建 Research Project。');
   } finally {
-    els.createProject.disabled = false;
-    els.createProject.textContent = '创建项目';
+    els.createResearchProjectButton.disabled = false;
+    els.createResearchProjectButton.textContent = '创建 Research Project';
   }
 }
 
 async function createConversation() {
-  if (!activeProject()) {
-    openProjectDialog();
+  if (!activeResearchProject()) {
+    openResearchProjectDialog();
     showToast('请先创建一个 Research Project。');
     return null;
   }
@@ -1252,6 +1264,7 @@ function populateSettings() {
   els.maxTokens.value = config.maxTokens || 49152;
   els.baseUrl.value = config.baseUrl || '';
   els.workspacePathInput.value = config.workspace || state.runtime?.workspaceDefault || '';
+  els.chooseSettingsResearchWorkspace.hidden = !state.requiresResearchWorkspaceBinding;
   els.settingsStatus.innerHTML = settingsStatusMarkup();
 }
 
@@ -1268,27 +1281,46 @@ async function saveSettings(event) {
   event.preventDefault();
   const workspace = els.workspacePathInput.value.trim();
   if (!workspace) {
-    showToast('请选择研究目录。');
+    showToast('请选择 Research Workspace。');
     return;
   }
   els.saveSettings.disabled = true;
   els.saveSettings.textContent = '正在连接…';
   try {
-    state.config = await bridge.configSave({
+    const response = await bridge.configSave({
       baseUrl: els.baseUrl.value.trim(),
       model: els.modelName.value.trim(),
       maxTokens: Number(els.maxTokens.value),
       workspace,
     });
-    closeSettings();
+    const { productState, configError, ...configuration } = response;
+    state.config = configuration;
+    if (productState) {
+      applyProductState(productState);
+      await recoverActiveProjectRuns();
+    }
     renderAll();
     await refreshWorkspace();
+    if (configError) {
+      showToast(`Research Project 已绑定，但配置保存失败：${configError}`, 6000);
+      return;
+    }
+    closeSettings();
     showToast('Science Agent 已连接 DeepSeek Harness。');
   } catch (error) {
     showToast(error.message || '保存设置失败。');
   } finally {
     els.saveSettings.disabled = false;
     els.saveSettings.textContent = '保存并连接';
+  }
+}
+
+async function chooseSettingsResearchWorkspace() {
+  try {
+    const selected = await bridge.pickResearchWorkspace();
+    if (selected) els.workspacePathInput.value = selected;
+  } catch (error) {
+    showToast(error.message || '无法选择 Research Workspace。');
   }
 }
 
@@ -1338,8 +1370,8 @@ function bindEvents() {
   });
 
   $('#context-workspace').addEventListener('click', () => {
-    if (activeProject() && state.config?.workspace) void bridge.openWorkspace();
-    else openProjectDialog();
+    if (activeResearchProject() && state.config?.workspace) void bridge.openWorkspace();
+    else openResearchProjectDialog();
   });
   $('#context-files').addEventListener('click', () => void attachResearchFiles());
   $('#new-research').addEventListener('click', () => {
@@ -1347,44 +1379,44 @@ function bindEvents() {
       showToast('请先停止当前Research Run。');
       return;
     }
-    if (!activeProject()) {
-      openProjectDialog();
+    if (!activeResearchProject()) {
+      openResearchProjectDialog();
       return;
     }
     void createConversation();
     if (window.innerWidth <= 820) els.shell.classList.add('sidebar-closed');
     els.prompt.focus();
   });
-  $('#add-project').addEventListener('click', openProjectDialog);
+  $('#add-project').addEventListener('click', openResearchProjectDialog);
 
   els.projectList.addEventListener('click', (event) => {
     const archiveButton = event.target.closest('[data-archive-project]');
     if (archiveButton) {
       event.stopPropagation();
-      void archiveProject(archiveButton.dataset.archiveProject);
+      void archiveResearchProject(archiveButton.dataset.archiveProject);
       return;
     }
     const restoreButton = event.target.closest('[data-restore-project]');
     if (restoreButton) {
       event.stopPropagation();
-      void restoreProject(restoreButton.dataset.restoreProject);
+      void restoreResearchProject(restoreButton.dataset.restoreProject);
       return;
     }
     const deleteButton = event.target.closest('[data-delete-project]');
     if (deleteButton) {
       event.stopPropagation();
-      void deleteProject(deleteButton.dataset.deleteProject);
+      void deleteResearchProject(deleteButton.dataset.deleteProject);
       return;
     }
     const item = event.target.closest('[data-project-id]');
-    if (item) void switchProject(item.dataset.projectId);
+    if (item) void switchResearchProject(item.dataset.projectId);
   });
   els.projectList.addEventListener('keydown', (event) => {
     if (event.target.closest('button')) return;
     const item = event.target.closest('[data-project-id]');
     if (item && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
-      void switchProject(item.dataset.projectId);
+      void switchResearchProject(item.dataset.projectId);
     }
   });
 
@@ -1422,13 +1454,14 @@ function bindEvents() {
   $('#close-settings').addEventListener('click', closeSettings);
   $('#cancel-settings').addEventListener('click', closeSettings);
   els.settingsForm.addEventListener('submit', saveSettings);
-  $('#close-project').addEventListener('click', closeProjectDialog);
-  $('#cancel-project').addEventListener('click', closeProjectDialog);
-  $('#choose-project-workspace').addEventListener('click', () => void chooseProjectImport());
-  els.projectForm.addEventListener('submit', submitProject);
+  $('#close-project').addEventListener('click', closeResearchProjectDialog);
+  $('#cancel-project').addEventListener('click', closeResearchProjectDialog);
+  $('#choose-project-workspace').addEventListener('click', () => void chooseResearchProjectImport());
+  els.chooseSettingsResearchWorkspace.addEventListener('click', () => void chooseSettingsResearchWorkspace());
+  els.projectForm.addEventListener('submit', submitResearchProject);
   $$('input[name="project-mode"]', els.projectForm).forEach((input) => {
     input.addEventListener('change', () => {
-      els.projectImportFields.hidden = selectedProjectMode() !== 'imported';
+      els.projectImportFields.hidden = selectedResearchProjectMode() !== 'imported';
     });
   });
   els.setApiKey.addEventListener('click', () => void captureApiKey());
@@ -1615,7 +1648,11 @@ async function init() {
   await refreshWorkspace();
   applyRuntimeState();
 
-  if (!isPreview && (!state.config?.apiKeyPresent || !state.config?.harnessInstalled)) {
+  if (!isPreview && (
+    state.requiresResearchWorkspaceBinding
+    || !state.config?.apiKeyPresent
+    || !state.config?.harnessInstalled
+  )) {
     setTimeout(openSettings, 350);
   }
 }
@@ -1662,6 +1699,7 @@ function createPreviewBridge() {
   });
   return {
     async configLoad() { return { ...previewConfig }; },
+    async pickResearchWorkspace() { return `${previewWorkspace} Selected`; },
     async configSave(payload) {
       Object.assign(previewConfig, payload, { apiKeyPresent: true, harnessInstalled: true });
       const project = previewProject();
