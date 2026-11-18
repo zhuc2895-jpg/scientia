@@ -106,6 +106,12 @@ function nextUnresolvedStageKey(stages, fromIndex) {
     .find((stage) => !TERMINAL_STATUSES.has(stages[stage.key]?.status))?.key || null;
 }
 
+function hasUnresolvedPrerequisites(stages, currentStageKey) {
+  const currentIndex = stageIndex(currentStageKey);
+  return currentIndex > 0 && RESEARCH_STAGES.slice(0, currentIndex)
+    .some((stage) => !TERMINAL_STATUSES.has(stages[stage.key]?.status));
+}
+
 export function createInitialResearchStageState() {
   return {
     currentStageKey: 'scoping',
@@ -127,7 +133,10 @@ export function normalizeResearchStageState(value) {
   let currentStageKey = typeof source.currentStageKey === 'string' && STAGE_KEYS.has(source.currentStageKey)
     ? source.currentStageKey
     : firstUnresolvedStageKey(stages);
-  if (currentStageKey && stages[currentStageKey]?.status === 'not-applicable') {
+  if (currentStageKey && (
+    stages[currentStageKey]?.status === 'not-applicable'
+    || hasUnresolvedPrerequisites(stages, currentStageKey)
+  )) {
     currentStageKey = firstUnresolvedStageKey(stages);
   }
   if (!currentStageKey) currentStageKey = null;

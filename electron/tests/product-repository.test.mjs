@@ -605,3 +605,30 @@ test('the complete stage graph reaches a durable terminal state', (t) => {
   assert.equal(restored.stages.every((stage) => stage.status === 'completed'), true);
   assert.equal(restored.nextAction.type, 'complete');
 });
+
+test('corrupt stage records cannot leave a later stage current without its prerequisites', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const first = openTestRepository(databasePath);
+  const projectId = first.loadState().activeProjectId;
+  first.close();
+
+  const database = new DatabaseSync(databasePath);
+  database.prepare(`
+    UPDATE projects
+    SET current_stage_key = 'release', research_stage_states_json = '{broken json'
+    WHERE id = ?
+  `).run(projectId);
+  database.close();
+
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const graph = repository.loadState().project.stageGraph;
+  assert.equal(graph.currentStageKey, 'scoping');
+  assert.equal(graph.stages[0].status, 'current');
+  assert.equal(graph.stages[5].status, 'pending');
+  assert.match(graph.stages[5].lockReason, /Scoping/);
+});
