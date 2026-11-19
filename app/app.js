@@ -1067,6 +1067,7 @@ function renderSourceLibrary() {
           <span class="source-title">${escapeHTML(source.title)}</span>
           <span class="source-meta">${escapeHTML(sourceKindLabel(source.kind))}${escapeHTML(year)} · ${escapeHTML(authors)}${escapeHTML(sourceIdentifierLabel(source))}</span>
         </button>
+        <button type="button" class="source-remove" data-remove-source="${escapeHTML(source.id)}" title="从 Source Library 移除" aria-label="移除 ${escapeHTML(source.title)}">×</button>
       </div>
     `;
   }).join('');
@@ -2119,7 +2120,18 @@ function bindEvents() {
     const checkbox = event.target.closest('[data-source-id]');
     if (checkbox) void setConversationSourceActive(checkbox.dataset.sourceId, checkbox.checked);
   });
-  els.sourceList.addEventListener('click', (event) => {
+  els.sourceList.addEventListener('click', async (event) => {
+    const removeButton = event.target.closest('[data-remove-source]');
+    if (removeButton) {
+      try {
+        applyProductState(await bridge.sourceRemove(removeButton.dataset.removeSource));
+        renderAll();
+        showToast('Source Record 已从当前 Project 移除。');
+      } catch (error) {
+        showToast(error.message || '无法移除 Source Record。', 5000);
+      }
+      return;
+    }
     const sourceButton = event.target.closest('[data-open-source]');
     if (sourceButton) void bridge.openPath(sourceButton.dataset.openSource);
   });
@@ -2590,6 +2602,15 @@ function createPreviewBridge() {
       const conversations = previewConversationsByProject.get(previewActiveProjectId) || [];
       const conversation = conversations.find((item) => item.id === conversationId);
       if (conversation) conversation.activeSourceIds = [...sourceIds];
+      return previewProductState();
+    },
+    async sourceRemove(id) {
+      previewSources = previewSources.filter((source) => source.id !== id);
+      for (const conversations of previewConversationsByProject.values()) {
+        for (const conversation of conversations) {
+          conversation.activeSourceIds = (conversation.activeSourceIds || []).filter((sourceId) => sourceId !== id);
+        }
+      }
       return previewProductState();
     },
     async runAgent(payload) {

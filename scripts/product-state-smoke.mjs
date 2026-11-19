@@ -392,7 +392,9 @@ try {
   assert.equal(sourceImport.duplicates.length, 0);
   const smokeSource = sourceImport.imported[0];
   assert.equal(smokeSource.doi, '10.1000/smoke');
+  assert.equal(smokeSource.cslJson.title, 'Smoke source record');
   assert.equal(smokeSource.localLocator.startsWith('.science/sources/'), true);
+  assert.equal(await evaluate(cdp, 'typeof window.scienceAgent.sourceRemove'), 'function');
   assert.equal(existsSync(path.join(workspace, smokeSource.localLocator)), true);
   const activeSourceState = await evaluate(cdp, `window.scienceAgent.sourceSetActive({
     conversationId: ${JSON.stringify(expectedId)},

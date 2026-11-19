@@ -54,6 +54,8 @@ class BridgeSmokeTests(unittest.TestCase):
                             raise RuntimeError("active source set missing from prompt")
                         if ".science/sources/source.md" not in prompt:
                             raise RuntimeError("registered source locator missing from prompt")
+                        if "The Active Source Set is the citation boundary" not in prompt:
+                            raise RuntimeError("active source citation boundary missing from prompt")
                         output_dir = next((self.cwd / ".science" / "outputs").iterdir())
                         (output_dir / "report.md").write_text("# Smoke report\\nSupported by [1].\\n", encoding="utf-8")
                         ledger_match = re.search(r"The evidence ledger is `([^`]+)`", prompt)

@@ -484,27 +484,88 @@ def _source_reference_tokens(value: Any) -> set[str]:
     basename = cleaned.rsplit("/", 1)[-1]
     if basename:
         tokens.add(basename)
+    doi_match = re.search(r"(?:doi:|doi\.org/)(10\.\d{4,9}/\S+)", cleaned)
+    if doi_match:
+        tokens.add(doi_match.group(1).rstrip(").,;"))
     return {token for token in tokens if token}
 
 
-def _unregistered_evidence_sources(
+def _doi_from_reference(value: str) -> str | None:
+    match = re.search(r"(?:doi:\s*|doi\.org/)?(10\.\d{4,9}/\S+)", value, flags=re.IGNORECASE)
+    return match.group(1).rstrip(").,;").lower() if match else None
+
+
+def _reference_matches_source(reference: str, source: dict[str, Any]) -> bool:
+    value = reference.strip().strip("'\"`").replace("\\", "/")
+    lowered = value.lower()
+    source_url = str(source.get("url") or "").strip().rstrip("/").lower()
+    source_doi = _doi_from_reference(str(source.get("doi") or source.get("stableIdentifier") or ""))
+    reference_doi = _doi_from_reference(lowered)
+
+    if lowered.startswith(("http://", "https://")):
+        if source_url and lowered.rstrip("/") == source_url:
+            return True
+        return bool(reference_doi and source_doi and reference_doi == source_doi)
+    if reference_doi:
+        return bool(source_doi and reference_doi == source_doi)
+
+    reference_path = lowered.split("#", 1)[0].rstrip("/")
+    reference_basename = reference_path.rsplit("/", 1)[-1]
+    for key in ("localLocator", "stableIdentifier", "title"):
+        candidate = str(source.get(key) or "").strip().replace("\\", "/")
+        candidate_lower = candidate.lower().split("#", 1)[0].rstrip("/")
+        if not candidate_lower:
+            continue
+        if reference_path == candidate_lower:
+            return True
+        if reference_basename and reference_basename == candidate_lower.rsplit("/", 1)[-1]:
+            return True
+    return False
+
+
+def _is_authorized_reference(
+    reference: str,
+    active_sources: list[dict[str, Any]],
+    registered_sources: list[dict[str, Any]],
+) -> bool:
+    return (
+        any(_reference_matches_source(reference, source) for source in active_sources)
+        and any(_reference_matches_source(reference, source) for source in registered_sources)
+    )
+
+
+def _out_of_boundary_evidence(
     entries: list[dict[str, Any]],
+    active_sources: list[dict[str, Any]],
     registered_sources: list[dict[str, Any]],
 ) -> list[str]:
-    registered_tokens: set[str] = set()
-    for source in registered_sources:
-        if not isinstance(source, dict):
-            continue
-        for key in ("localLocator", "stableIdentifier", "doi", "url", "title"):
-            registered_tokens.update(_source_reference_tokens(source.get(key)))
     unresolved: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict):
             continue
         source = entry.get("source")
-        tokens = _source_reference_tokens(source)
-        if tokens and tokens.isdisjoint(registered_tokens):
-            unresolved.append(str(source))
+        if isinstance(source, str) and source.strip() and not _is_authorized_reference(
+            source, active_sources, registered_sources
+        ):
+            unresolved.append(source)
+    return unresolved
+
+
+def _out_of_boundary_citations(
+    result_text: str,
+    active_sources: list[dict[str, Any]],
+    registered_sources: list[dict[str, Any]],
+) -> list[str]:
+    citations = re.findall(
+        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
+        result_text,
+        flags=re.IGNORECASE,
+    )
+    unresolved: list[str] = []
+    for citation in citations:
+        cleaned = citation.rstrip(").,;")
+        if not _is_authorized_reference(cleaned, active_sources, registered_sources):
+            unresolved.append(cleaned)
     return unresolved
 
 
@@ -516,6 +577,7 @@ def assess_result(
     *,
     new_evidence_entries: list[dict[str, Any]] | None = None,
     registered_sources: list[dict[str, Any]] | None = None,
+    active_sources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     text = result_text or ""
     citation_count = len(re.findall(
@@ -553,27 +615,38 @@ def assess_result(
             ),
         },
     ]
-    unregistered_sources: list[str] = []
-    if new_evidence_entries is not None and registered_sources is not None:
-        unregistered_sources = _unregistered_evidence_sources(new_evidence_entries, registered_sources)
+    out_of_boundary_evidence: list[str] = []
+    out_of_boundary_citations: list[str] = []
+    if active_sources is not None:
+        out_of_boundary_evidence = _out_of_boundary_evidence(
+            new_evidence_entries or [], active_sources, registered_sources or []
+        )
+        out_of_boundary_citations = _out_of_boundary_citations(
+            text, active_sources, registered_sources or []
+        )
+        boundary_violation = bool(out_of_boundary_evidence or out_of_boundary_citations)
         checks.append({
-            "id": "source-registration",
-            "status": "warn" if unregistered_sources else "pass",
-            "label": "来源登记",
+            "id": "source-boundary",
+            "status": "fail" if boundary_violation else "pass",
+            "label": "Active Source Set",
             "detail": (
-                f"{len(unregistered_sources)} 条新增证据引用了未登记来源。"
-                if unregistered_sources
-                else "新增证据均引用 Project Source Library 中已登记的来源。"
+                f"{len(out_of_boundary_evidence)} 条证据来源与 {len(out_of_boundary_citations)} 处引用超出 Active Source Set。"
+                if boundary_violation
+                else "新增证据与引用均在 Active Source Set 内。"
             ),
         })
     warnings = sum(1 for check in checks if check["status"] == "warn")
+    blocking = any(check["status"] == "fail" for check in checks)
     return {
         "checks": checks,
         "warnings": warnings,
+        "blocking": blocking,
         "citationCount": citation_count,
         "artifactCount": len(artifacts),
         "evidenceAdded": evidence_added,
-        "unregisteredEvidenceSources": unregistered_sources,
+        "outOfBoundaryEvidenceSources": out_of_boundary_evidence,
+        "outOfBoundaryCitations": out_of_boundary_citations,
+        "unregisteredEvidenceSources": out_of_boundary_evidence,
     }
 
 
@@ -589,6 +662,7 @@ def finalize_research_run(
     status: str = "completed",
     error: str = "",
     registered_sources: list[dict[str, Any]] | None = None,
+    active_sources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workspace = workspace.resolve()
     output_dir = workspace / run_context["outputDir"]
@@ -611,16 +685,22 @@ def finalize_research_run(
         evidence_added,
         new_evidence_entries=new_evidence_entries,
         registered_sources=registered_sources,
+        active_sources=active_sources,
     )
+    effective_status = status
+    effective_error = error
+    if status == "completed" and quality["blocking"]:
+        effective_status = "failed"
+        effective_error = "Research Run cited or recorded evidence outside the Active Source Set."
 
     finished_at = utc_now()
     manifest.update({
-        "status": status,
+        "status": effective_status,
         "finishedAt": finished_at,
         "sessionId": session_id,
         "finishReason": finish_reason,
         "usage": usage,
-        "error": error,
+        "error": effective_error,
         "result": result_text[:2_000_000],
         "artifacts": artifacts,
         "evidenceAfter": len(evidence_after),
@@ -632,7 +712,7 @@ def finalize_research_run(
         "type": "run/end",
         "runId": manifest.get("runId"),
         "finishedAt": finished_at,
-        "status": status,
+        "status": effective_status,
         "artifactCount": len(artifacts),
         "evidenceAdded": evidence_added,
         "warnings": quality["warnings"],

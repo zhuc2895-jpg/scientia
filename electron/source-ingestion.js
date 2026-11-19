@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  buildCslJson,
   classifyReferenceInput,
   normalizeSourceYear,
   parseBibTeX,
@@ -37,6 +38,16 @@ function relativeLocator(workspacePath, absolutePath) {
   return path.relative(workspacePath, absolutePath).split(path.sep).join('/');
 }
 
+function extensionForContentType(contentType) {
+  const value = String(contentType || '').toLowerCase();
+  if (value.includes('html')) return '.html';
+  if (value.includes('pdf')) return '.pdf';
+  if (value.includes('json')) return '.json';
+  if (value.includes('xml')) return '.xml';
+  if (value.startsWith('text/')) return '.txt';
+  return '.bin';
+}
+
 function sourceBase(sourceName) {
   return String(sourceName || 'source').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
 }
@@ -67,8 +78,10 @@ export async function ingestSourceFiles({
   await fs.mkdir(sourceDirectory, { recursive: true });
   const acquiredAt = now();
   const records = [];
+  const copiedDestinations = [];
 
-  for (const filePath of filePaths) {
+  try {
+    for (const filePath of filePaths) {
     if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('来源文件路径无效。');
     const extension = path.extname(filePath).toLowerCase();
     const kind = SOURCE_FORMATS.get(extension);
@@ -81,6 +94,7 @@ export async function ingestSourceFiles({
     const id = String(idFactory());
     const destination = path.join(sourceDirectory, `${safeSegment(id)}-${safeSegment(sourceName)}`);
     await fs.copyFile(filePath, destination);
+    copiedDestinations.push(destination);
     const locator = relativeLocator(workspacePath, destination);
 
     parsed.forEach((entry, index) => {
@@ -98,6 +112,13 @@ export async function ingestSourceFiles({
         localLocator: parsed.length > 1 ? `${locator}#entry-${index + 1}` : locator,
         contentHash: fileHash,
         acquiredAt,
+        citekey: entry.metadata?.citationKey || null,
+        bibtex: entry.kind === 'bibtex' && entry.raw ? entry.raw : null,
+        cslJson: buildCslJson({
+          ...entry,
+          kind: entry.kind || kind,
+          entryType: entry.metadata?.entryType,
+        }),
         metadata: {
           ...(entry.metadata || {}),
           sourceName,
@@ -107,6 +128,10 @@ export async function ingestSourceFiles({
         },
       });
     });
+    }
+  } catch (error) {
+    await Promise.allSettled(copiedDestinations.map((destination) => fs.rm(destination, { force: true })));
+    throw error;
   }
   return records;
 }
@@ -116,6 +141,7 @@ export async function ingestReference({
   reference,
   title = '',
   year = null,
+  fetchImpl = globalThis.fetch,
   now = () => new Date().toISOString(),
   idFactory = randomUUID,
 } = {}) {
@@ -129,21 +155,35 @@ export async function ingestReference({
     || (classified.kind === 'doi' ? `DOI ${classified.value}` : classified.value);
   const normalizedYear = normalizeSourceYear(year);
   const originalReference = String(reference).trim();
-  const contentHash = sha256(Buffer.from(originalReference, 'utf8'));
-  const payload = {
-    id,
-    kind: classified.kind,
-    reference: classified.value,
-    title: normalizedTitle,
-    year: normalizedYear,
-    acquiredAt,
-    contentHash,
-    contentHashBasis: 'imported-reference',
-  };
-  const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-  const localFileHash = sha256(bytes);
+  const fetchUrl = classified.kind === 'doi' ? `https://doi.org/${classified.value}` : classified.value;
+  let bytes;
+  let extension = '.bin';
+  let contentHashBasis = 'retrieved-content';
+  let fetchStatus = 'retrieved';
+  let fetchError = '';
+  try {
+    if (typeof fetchImpl !== 'function') throw new Error('HTTP 获取不可用。');
+    const response = await fetchImpl(fetchUrl, { redirect: 'follow' });
+    if (!response?.ok) throw new Error(`HTTP ${response?.status || 'unknown'}`);
+    bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > 32 * 1024 * 1024) throw new Error('来源内容超过 32 MiB。');
+    extension = extensionForContentType(response.headers?.get?.('content-type'));
+  } catch (error) {
+    fetchStatus = 'unavailable';
+    fetchError = error instanceof Error ? error.message : String(error);
+    contentHashBasis = 'reference-snapshot';
+    bytes = Buffer.from(`${JSON.stringify({
+      reference: classified.value,
+      title: normalizedTitle,
+      year: normalizedYear,
+      acquiredAt,
+      fetchError,
+    }, null, 2)}\n`, 'utf8');
+    extension = '.json';
+  }
+  const contentHash = sha256(bytes);
   const directory = path.join(workspacePath, '.science', 'sources');
-  const destination = path.join(directory, `${safeSegment(id)}-reference.json`);
+  const destination = path.join(directory, `${safeSegment(id)}-reference${extension}`);
   await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(destination, bytes);
   return {
@@ -159,11 +199,23 @@ export async function ingestReference({
     localLocator: relativeLocator(workspacePath, destination),
     contentHash,
     acquiredAt,
+    citekey: null,
+    bibtex: null,
+    cslJson: buildCslJson({
+      kind: classified.kind,
+      title: normalizedTitle,
+      year: normalizedYear,
+      doi: classified.kind === 'doi' ? classified.value : null,
+      url: classified.kind === 'url' ? classified.value : null,
+    }),
     metadata: {
       reference: classified.value,
       sourceName: path.basename(destination),
-      fileHash: localFileHash,
-      contentHashBasis: 'imported-reference',
+      fileHash: contentHash,
+      contentHashBasis,
+      fetchStatus,
+      fetchError,
+      sourceUrl: fetchUrl,
     },
   };
 }

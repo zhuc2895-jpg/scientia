@@ -1045,3 +1045,116 @@ test('adding a source after Evidence revokes freeze by returning the project to 
   assert.equal(stageGraph.currentStage.isCompleted, true);
   assert.deepEqual(stageGraph.nextAction.allowedActions, ['complete']);
 });
+
+test('source records preserve BibTeX and CSL JSON metadata', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({
+    sources: [sourceRecord({
+      id: 'source-bibtex',
+      kind: 'bibtex',
+      citekey: 'smith2024',
+      bibtex: '@article{smith2024, title={A Reproducible Trial}, year={2023}}',
+      cslJson: {
+        type: 'article-journal',
+        title: 'A Reproducible Trial',
+        DOI: '10.1000/trial',
+        issued: { 'date-parts': [[2023]] },
+      },
+    })],
+  });
+  repository.close();
+  repository = openTestRepository(databasePath);
+
+  const source = repository.getSource('source-bibtex');
+  assert.match(source.bibtex, /@article\{smith2024/);
+  assert.deepEqual(source.cslJson, {
+    type: 'article-journal',
+    title: 'A Reproducible Trial',
+    DOI: '10.1000/trial',
+    issued: { 'date-parts': [[2023]] },
+  });
+});
+
+test('conversation updates cannot bypass Active Source Set ownership validation', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const firstConversation = conversation({ id: 'source-owner-conversation' });
+  repository.createConversation(firstConversation);
+  repository.registerSources({ sources: [sourceRecord()] });
+
+  repository.createProject({
+    id: 'source-owner-project-b',
+    name: 'Source Owner Project B',
+    workspacePath: 'C:/Research/Source Owner B',
+    workspaceKind: 'imported',
+  });
+  const secondConversation = conversation({ id: 'source-owner-conversation-b', title: 'Project B conversation' });
+  repository.createConversation(secondConversation);
+
+  assert.throws(() => repository.updateConversation({
+    ...secondConversation,
+    activeSourceIds: ['source-1'],
+  }), /不属于当前 Research Project/);
+  assert.equal(repository.loadState().conversations.find((item) => item.id === secondConversation.id).activeSourceIds, undefined);
+});
+test('conversation creation rejects Active Source IDs from another project', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  repository.createProject({
+    id: 'source-create-project-b',
+    name: 'Source Create Project B',
+    workspacePath: 'C:/Research/Source Create B',
+    workspaceKind: 'imported',
+  });
+
+  assert.throws(() => repository.createConversation(conversation({
+    id: 'source-create-conversation-b',
+    activeSourceIds: ['source-1'],
+  })), /不属于当前 Research Project/);
+  assert.equal(repository.loadState().conversations.some((item) => item.id === 'source-create-conversation-b'), false);
+});
+
+test('removing a source clears active sets and revokes Evidence Freeze', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const activeConversation = conversation({ id: 'conversation-remove-source' });
+  repository.createConversation(activeConversation);
+  repository.registerSources({ sources: [sourceRecord()] });
+  repository.setActiveSources({
+    conversationId: activeConversation.id,
+    sourceIds: ['source-1'],
+  });
+  approveTestCharter(repository);
+  repository.completeResearchStage('evidence');
+  assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'inquiry');
+
+  const state = repository.removeSource('source-1');
+  assert.equal(state.sources.some((source) => source.id === 'source-1'), false);
+  assert.deepEqual(
+    state.conversations.find((item) => item.id === activeConversation.id).activeSourceIds,
+    [],
+  );
+  assert.equal(state.project.stageGraph.currentStageKey, 'evidence');
+});

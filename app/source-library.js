@@ -85,6 +85,39 @@ export function stableIdentifierForSource(source) {
   return null;
 }
 
+export function buildCslJson(source = {}) {
+  const typeMap = {
+    article: 'article-journal',
+    book: 'book',
+    inproceedings: 'paper-conference',
+    JOUR: 'article-journal',
+    BOOK: 'book',
+    CONF: 'paper-conference',
+    doi: 'article-journal',
+    url: 'webpage',
+  };
+  const cslType = typeMap[source.entryType] || typeMap[source.kind] || 'document';
+  const authors = (Array.isArray(source.authors) ? source.authors : []).map((author) => {
+    const value = String(author || '').trim();
+    const comma = value.indexOf(',');
+    if (comma >= 0) return { family: value.slice(0, comma).trim(), given: value.slice(comma + 1).trim() };
+    const parts = value.split(/\s+/);
+    return parts.length > 1
+      ? { family: parts.pop(), given: parts.join(' ') }
+      : { literal: value };
+  }).filter((author) => author.family || author.literal);
+  const csl = {
+    type: cslType,
+    title: String(source.title || '').trim(),
+    ...(authors.length ? { author: authors } : {}),
+    ...(normalizeSourceYear(source.year) ? { issued: { 'date-parts': [[normalizeSourceYear(source.year)]] } } : {}),
+    ...(normalizeDoi(source.doi) ? { DOI: normalizeDoi(source.doi) } : {}),
+    ...(normalizeSourceUrl(source.url) ? { URL: normalizeSourceUrl(source.url) } : {}),
+    ...(source.venue ? { 'container-title': String(source.venue).trim() } : {}),
+  };
+  return csl;
+}
+
 export function findDuplicateSource(candidate, existingSources = []) {
   const candidateStable = stableIdentifierForSource(candidate);
   const candidateDoi = normalizeDoi(candidate?.doi);
@@ -102,10 +135,17 @@ export function findDuplicateSource(candidate, existingSources = []) {
   }
 
   if (!candidateTitle || !candidateYear) return null;
-  return existingSources.find((existing) => (
-    normalizeSourceTitle(existing?.title) === candidateTitle
-    && normalizeSourceYear(existing?.year) === candidateYear
-  )) || null;
+  const authoritativeStable = (value) => /^(?:doi|url):/i.test(value || '');
+  return existingSources.find((existing) => {
+    const existingStable = stableIdentifierForSource(existing);
+    if (
+      authoritativeStable(candidateStable)
+      && authoritativeStable(existingStable)
+      && candidateStable !== existingStable
+    ) return false;
+    return normalizeSourceTitle(existing?.title) === candidateTitle
+      && normalizeSourceYear(existing?.year) === candidateYear;
+  }) || null;
 }
 
 function parseBibFields(content) {
@@ -177,7 +217,7 @@ export function parseBibTeX(text) {
       doi,
       url,
       venue: cleanBraces(stripWrapping(fields.journal || fields.booktitle || fields.publisher || '')),
-      stableIdentifier: doi ? `doi:${doi}` : url ? `url:${url}` : `bibtex:${citationKey.toLowerCase()}`,
+      stableIdentifier: doi ? `doi:${doi}` : url ? `url:${url}` : null,
       metadata: { entryType, citationKey, fields },
       raw: source.slice(index + match.index, cursor),
     });

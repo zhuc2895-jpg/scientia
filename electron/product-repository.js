@@ -71,6 +71,9 @@ function deserializeSource(row) {
     localLocator: row.local_locator,
     contentHash: row.content_hash,
     acquiredAt: row.acquired_at,
+    citekey: row.citekey || null,
+    bibtex: row.bibtex || null,
+    cslJson: parseJsonObject(row.csl_json),
     metadata: parseJsonObject(row.metadata_json),
   };
 }
@@ -115,6 +118,9 @@ function normalizeSourceRecord(value = {}) {
     localLocator: localLocator.slice(0, 2000),
     contentHash,
     acquiredAt,
+    citekey: typeof value.citekey === 'string' && value.citekey.trim() ? value.citekey.trim().slice(0, 200) : null,
+    bibtex: typeof value.bibtex === 'string' && value.bibtex.trim() ? value.bibtex.trim().slice(0, 50000) : null,
+    cslJson: value.cslJson && typeof value.cslJson === 'object' && !Array.isArray(value.cslJson) ? value.cslJson : {},
     metadata: value.metadata && typeof value.metadata === 'object' && !Array.isArray(value.metadata) ? value.metadata : {},
   };
 }
@@ -215,6 +221,9 @@ export function openProductRepository({ databasePath }) {
       local_locator TEXT NOT NULL,
       content_hash TEXT NOT NULL,
       acquired_at TEXT NOT NULL,
+      citekey TEXT,
+      bibtex TEXT,
+      csl_json TEXT NOT NULL DEFAULT '{}',
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -228,6 +237,16 @@ export function openProductRepository({ databasePath }) {
   const conversationColumns = database.prepare('PRAGMA table_info(conversations)').all();
   if (!conversationColumns.some((column) => column.name === 'project_id')) {
     database.exec(`ALTER TABLE conversations ADD COLUMN project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT_ID}'`);
+  }
+  const sourceColumns = database.prepare('PRAGMA table_info(sources)').all();
+  if (!sourceColumns.some((column) => column.name === 'citekey')) {
+    database.exec('ALTER TABLE sources ADD COLUMN citekey TEXT');
+  }
+  if (!sourceColumns.some((column) => column.name === 'bibtex')) {
+    database.exec('ALTER TABLE sources ADD COLUMN bibtex TEXT');
+  }
+  if (!sourceColumns.some((column) => column.name === 'csl_json')) {
+    database.exec("ALTER TABLE sources ADD COLUMN csl_json TEXT NOT NULL DEFAULT '{}'");
   }
   const projectColumns = database.prepare('PRAGMA table_info(projects)').all();
   if (!projectColumns.some((column) => column.name === 'workspace_kind')) {
@@ -323,20 +342,22 @@ export function openProductRepository({ databasePath }) {
   const insertSource = database.prepare(`
     INSERT INTO sources (
       id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
-      stable_identifier, local_locator, content_hash, acquired_at, metadata_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json,
+      metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectSources = database.prepare(`
     SELECT id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
-           stable_identifier, local_locator, content_hash, acquired_at, metadata_json
+           stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json, metadata_json
     FROM sources WHERE project_id = ? ORDER BY acquired_at DESC, title ASC, id ASC
   `);
   const selectSourceForProject = database.prepare(`
     SELECT id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
-           stable_identifier, local_locator, content_hash, acquired_at, metadata_json
+           stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json, metadata_json
     FROM sources WHERE id = ? AND project_id = ?
   `);
   const selectSourceById = database.prepare('SELECT id, project_id FROM sources WHERE id = ?');
+  const deleteSource = database.prepare('DELETE FROM sources WHERE id = ? AND project_id = ?');
 
   let closed = false;
 
@@ -788,10 +809,29 @@ export function openProductRepository({ databasePath }) {
     return selectConversationById.get(id)?.project_id || null;
   }
 
+  function normalizeConversationActiveSources(conversation, project) {
+    if (conversation.activeSourceIds === undefined) return conversation;
+    if (!Array.isArray(conversation.activeSourceIds)) {
+      throw new Error('Active Source Set 格式无效。');
+    }
+    const uniqueIds = [...new Set(
+      conversation.activeSourceIds
+        .filter((id) => typeof id === 'string' && id.trim())
+        .map((id) => id.trim()),
+    )];
+    if (uniqueIds.length > 500) throw new Error('Active Source Set 最多包含 500 个 Source Record。');
+    for (const sourceId of uniqueIds) {
+      if (selectSourceForProject.get(sourceId, project.id)) continue;
+      if (selectSourceById.get(sourceId)) throw new Error('Source 不属于当前 Research Project。');
+      throw new Error('Source Record 不存在。');
+    }
+    return { ...conversation, activeSourceIds: uniqueIds };
+  }
+
   function createConversation(value) {
     assertOpen();
     const project = assertActiveProject();
-    const conversation = normalizeConversation(value);
+    const conversation = normalizeConversationActiveSources(normalizeConversation(value), project);
     insertConversation.run(
       conversation.id,
       project.id,
@@ -806,7 +846,7 @@ export function openProductRepository({ databasePath }) {
   function updateConversationRecord(value) {
     assertOpen();
     const project = assertActiveProject();
-    const conversation = normalizeConversation(value);
+    const conversation = normalizeConversationActiveSources(normalizeConversation(value), project);
     const result = updateConversation.run(
       conversation.title,
       conversation.createdAt,
@@ -840,7 +880,7 @@ export function openProductRepository({ databasePath }) {
       return { ...loadState(), migrated: false };
     }
     if (!Array.isArray(conversations)) throw new Error('旧会话数据格式无效。');
-    const normalized = conversations.map(normalizeConversation);
+    const normalized = conversations.map((conversation) => normalizeConversationActiveSources(normalizeConversation(conversation), project));
     const uniqueById = new Map();
     for (const conversation of normalized) {
       const existing = uniqueById.get(conversation.id);
@@ -908,6 +948,22 @@ export function openProductRepository({ databasePath }) {
     return { project, conversationRow };
   }
 
+  function revokeEvidenceFreezeAfterSourceMutation(project, timestamp) {
+    const stageState = researchStageStateForRow(project);
+    if (
+      ['inquiry', 'synthesis', 'manuscript', 'release'].includes(stageState.currentStageKey)
+      && stageState.stages.evidence?.status === 'completed'
+    ) {
+      const reopened = reopenResearchStage(stageState, 'evidence', { reopenedAt: timestamp });
+      updateResearchStageState.run(
+        reopened.currentStageKey || '',
+        JSON.stringify(reopened.stages),
+        timestamp,
+        project.id,
+      );
+    }
+  }
+
   function registerSources({ sources } = {}) {
     assertOpen();
     const project = assertActiveProject();
@@ -941,6 +997,9 @@ export function openProductRepository({ databasePath }) {
           source.localLocator,
           source.contentHash,
           source.acquiredAt,
+          source.citekey,
+          source.bibtex,
+          JSON.stringify(source.cslJson),
           JSON.stringify(source.metadata),
           createdAt,
         );
@@ -949,20 +1008,7 @@ export function openProductRepository({ databasePath }) {
         existing.push(stored);
       }
       if (inserted.length) {
-        const stageState = researchStageStateForRow(project);
-        if (
-          ['inquiry', 'synthesis', 'manuscript', 'release'].includes(stageState.currentStageKey)
-          && stageState.stages.evidence?.status === 'completed'
-        ) {
-          const reopenedAt = new Date().toISOString();
-          const reopened = reopenResearchStage(stageState, 'evidence', { reopenedAt });
-          updateResearchStageState.run(
-            reopened.currentStageKey || '',
-            JSON.stringify(reopened.stages),
-            reopenedAt,
-            project.id,
-          );
-        }
+        revokeEvidenceFreezeAfterSourceMutation(project, new Date().toISOString());
       }
       database.exec('COMMIT');
     } catch (error) {
@@ -970,6 +1016,44 @@ export function openProductRepository({ databasePath }) {
       throw error;
     }
     return { inserted, duplicates };
+  }
+
+  function removeSource(id) {
+    assertOpen();
+    const project = assertActiveProject();
+    const source = selectSourceForProject.get(id, project.id);
+    if (!source) {
+      if (selectSourceById.get(id)) throw new Error('Source 不属于当前 Research Project。');
+      throw new Error('Source Record 不存在。');
+    }
+    const timestamp = new Date().toISOString();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      deleteSource.run(id, project.id);
+      for (const conversationRow of selectConversations.all(project.id)) {
+        const conversationState = deserializeConversation(conversationRow);
+        if (!Array.isArray(conversationState.activeSourceIds) || !conversationState.activeSourceIds.includes(id)) continue;
+        const updated = {
+          ...conversationState,
+          activeSourceIds: conversationState.activeSourceIds.filter((sourceId) => sourceId !== id),
+          updatedAt: timestamp,
+        };
+        updateConversation.run(
+          updated.title,
+          updated.createdAt,
+          updated.updatedAt,
+          JSON.stringify(updated),
+          updated.id,
+          project.id,
+        );
+      }
+      revokeEvidenceFreezeAfterSourceMutation(project, timestamp);
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
+    }
+    return loadState();
   }
 
   function getSource(id) {
@@ -1039,6 +1123,7 @@ export function openProductRepository({ databasePath }) {
     listCheckpoints: listCheckpointRecords,
     registerSources,
     getSource,
+    removeSource,
     getConversationActiveSourceIds,
     getConversationActiveSources,
     setActiveSources,

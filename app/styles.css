@@ -1513,7 +1513,7 @@ button.context-chip:hover { background: rgba(255,255,255,.52); color: var(--ink-
 .source-library-actions .mini-button { flex: 1; }
 .active-source-summary { padding: 0 3px 8px; color: var(--faint); font-family: var(--font-mono); font-size: 8px; line-height: 1.5; }
 .source-list { display: flex; flex-direction: column; gap: 5px; max-height: 238px; overflow: auto; padding: 1px 2px 2px; }
-.source-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; gap: 5px; padding: 8px 9px; border: 1px solid rgba(99,108,121,.12); border-radius: 9px; background: rgba(255,255,255,.38); transition: border-color .15s ease, background .15s ease; }
+.source-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 18px; align-items: start; gap: 5px; padding: 8px 9px; border: 1px solid rgba(99,108,121,.12); border-radius: 9px; background: rgba(255,255,255,.38); transition: border-color .15s ease, background .15s ease; }
 .source-row.active { border-color: rgba(62,130,126,.3); background: rgba(107,169,162,.1); }
 .source-select { display: grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; cursor: pointer; }
 .source-select input { position: absolute; opacity: 0; pointer-events: none; }
@@ -1521,6 +1521,8 @@ button.context-chip:hover { background: rgba(255,255,255,.52); color: var(--ink-
 .source-select input:checked + span { border-color: rgba(62,130,126,.55); background: var(--teal, #4b8c86); box-shadow: inset 0 0 0 3px rgba(255,255,255,.82); }
 .source-select input:disabled + span { opacity: .45; cursor: not-allowed; }
 .source-copy { min-width: 0; display: grid; gap: 3px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.source-remove { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--faint); cursor: pointer; line-height: 1; }
+.source-remove:hover { background: rgba(184,112,83,.12); color: var(--coral); }
 .source-title { overflow: hidden; color: var(--ink-soft); font-size: 10px; font-weight: 650; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .source-meta { overflow: hidden; color: var(--faint); font-family: var(--font-mono); font-size: 7.5px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
 .source-empty { padding: 11px 10px; border: 1px dashed rgba(99,108,121,.18); border-radius: 9px; color: var(--faint); font-size: 9px; line-height: 1.6; }

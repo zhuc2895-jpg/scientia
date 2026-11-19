@@ -173,30 +173,137 @@ class ResearchRuntimeTests(unittest.TestCase):
             self.assertEqual(extracted["question"], "Q")
             self.assertEqual(extracted["citationStyle"], "APA 7")
 
-    def test_assess_result_checks_evidence_against_registered_sources(self) -> None:
-        registered = [{"localLocator": ".science/sources/paper.md"}]
-        registered_quality = assess_result(
+    def test_assess_result_enforces_the_active_source_citation_boundary(self) -> None:
+        active = [{"localLocator": ".science/sources/paper.md"}]
+        registered = [*active, {"localLocator": ".science/sources/inactive.md"}]
+        active_quality = assess_result(
             "Observed in [1]. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
             new_evidence_entries=[{"source": "paper.md"}],
             registered_sources=registered,
+            active_sources=active,
         )
-        source_check = next(check for check in registered_quality["checks"] if check["id"] == "source-registration")
+        source_check = next(check for check in active_quality["checks"] if check["id"] == "source-boundary")
         self.assertEqual(source_check["status"], "pass")
+        self.assertFalse(active_quality["blocking"])
 
-        unregistered_quality = assess_result(
+        inactive_quality = assess_result(
             "Observed in [1]. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[{"source": "unregistered-web-page"}],
+            new_evidence_entries=[{"source": "inactive.md"}],
             registered_sources=registered,
+            active_sources=active,
         )
-        source_check = next(check for check in unregistered_quality["checks"] if check["id"] == "source-registration")
-        self.assertEqual(source_check["status"], "warn")
-        self.assertEqual(unregistered_quality["unregisteredEvidenceSources"], ["unregistered-web-page"])
+        source_check = next(check for check in inactive_quality["checks"] if check["id"] == "source-boundary")
+        self.assertEqual(source_check["status"], "fail")
+        self.assertTrue(inactive_quality["blocking"])
+        self.assertEqual(inactive_quality["outOfBoundaryEvidenceSources"], ["inactive.md"])
+
+        citation_quality = assess_result(
+            "See https://unregistered.example/paper. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            0,
+            registered_sources=registered,
+            active_sources=active,
+        )
+        self.assertTrue(citation_quality["blocking"])
+        self.assertEqual(
+            citation_quality["outOfBoundaryCitations"],
+            ["https://unregistered.example/paper"],
+        )
+
+        basename_collision = assess_result(
+            "See https://untrusted.example/paper.pdf. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            0,
+            registered_sources=[{"localLocator": ".science/sources/paper.pdf"}],
+            active_sources=[{"localLocator": ".science/sources/paper.pdf"}],
+        )
+        self.assertTrue(basename_collision["blocking"])
+        self.assertEqual(
+            basename_collision["outOfBoundaryCitations"],
+            ["https://untrusted.example/paper.pdf"],
+        )
+
+    def test_finalize_records_registered_and_active_source_scope_in_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            context = prepare_research_run(
+                workspace,
+                conversation_id="conversation-source-audit",
+                run_id="run-source-audit",
+                prompt="Audit source scope.",
+                model="deepseek-v4-flash",
+            )
+            registered = [{
+                "id": "source-1",
+                "title": "Registered paper",
+                "localLocator": ".science/sources/paper.md",
+                "contentHash": "a" * 64,
+                "verificationState": "partial",
+                "freshnessState": "current",
+            }]
+            active = [{**registered[0], "title": "Active paper"}]
+
+            finalize_research_run(
+                workspace,
+                run_context=context,
+                result_text="Observed a limitation.",
+                prompt="Audit source scope.",
+                status="completed",
+                registered_sources=registered,
+                active_sources=active,
+            )
+
+            manifest_path = workspace / ".science" / "runs" / context["sessionKey"] / context["runKey"] / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["sourceScope"]["registered"][0]["contentHash"], "a" * 64)
+            self.assertEqual(manifest["sourceScope"]["active"][0]["title"], "Active paper")
+            self.assertEqual(manifest["sourceScope"]["active"][0]["localLocator"], ".science/sources/paper.md")
+
+    def test_finalize_marks_a_run_failed_when_evidence_leaves_the_active_source_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            context = prepare_research_run(
+                workspace,
+                conversation_id="conversation-source-gate",
+                run_id="run-source-gate",
+                prompt="Use only the active source set.",
+                model="deepseek-v4-flash",
+            )
+            ledger = workspace / context["evidencePath"]
+            ledger.write_text(json.dumps({
+                "claim": "Out-of-boundary claim",
+                "source": "inactive.md",
+                "locator": "line 1",
+                "quote": "evidence",
+                "confidence": "high",
+                "addedAt": "2026-11-20T00:00:00+00:00",
+            }) + "\n", encoding="utf-8")
+
+            result = finalize_research_run(
+                workspace,
+                run_context=context,
+                result_text="Observed in [1]. Limitation: one source.",
+                prompt="Use only the active source set.",
+                status="completed",
+                registered_sources=[
+                    {"localLocator": ".science/sources/paper.md"},
+                    {"localLocator": ".science/sources/inactive.md"},
+                ],
+                active_sources=[{"localLocator": ".science/sources/paper.md"}],
+            )
+            self.assertTrue(result["quality"]["blocking"])
+            manifest_path = workspace / ".science" / "runs" / context["sessionKey"] / context["runKey"] / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "failed")
+            self.assertIn("Active Source Set", manifest["error"])
 
 
 if __name__ == "__main__":

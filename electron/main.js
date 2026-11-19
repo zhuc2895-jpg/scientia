@@ -426,6 +426,40 @@ async function registerImportedSources(workspacePath, sources) {
   };
 }
 
+async function removeProjectSource(id) {
+  const source = productRepository.getSource(id);
+  if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: 'Remove Source Record',
+    message: `Remove “${source.title}” from the Source Library?`,
+    detail: 'The Source Record and its Active Source Set memberships will be removed. The local source file is preserved.',
+    buttons: ['Cancel', 'Remove'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
+  productRepository.recordCheckpoint({
+    type: 'source-removal',
+    decision,
+    rationale: decision === 'approved'
+      ? 'User approved removing a Source Record from the Project Source Library.'
+      : 'User cancelled removing a Source Record from the Project Source Library.',
+    metadata: { sourceId: source.id, title: source.title, localLocator: source.localLocator },
+  });
+  if (decision !== 'approved') throw new Error('User cancelled Source Record removal.');
+  const nextState = productRepository.removeSource(id);
+  const localLocator = source.localLocator.split('#')[0];
+  const stillReferenced = nextState.sources.some((item) => item.localLocator.split('#')[0] === localLocator);
+  if (!stillReferenced && localLocator.startsWith('.science/sources/')) {
+    const workspace = path.resolve(currentProjectWorkspace());
+    const sourcePath = path.resolve(workspace, localLocator);
+    if (isWithin(workspace, sourcePath)) await fs.rm(sourcePath, { force: true });
+  }
+  return nextState;
+}
+
 async function pickAndImportSourceFiles() {
   const workspace = currentProjectWorkspace();
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -812,6 +846,7 @@ function installIpc() {
   ipcMain.handle('sources:pick-import', async () => pickAndImportSourceFiles());
   ipcMain.handle('sources:import-reference', async (_event, payload) => importSourceReference(payload));
   ipcMain.handle('sources:set-active', async (_event, payload) => productRepository.setActiveSources(payload));
+  ipcMain.handle('sources:remove', async (_event, id) => removeProjectSource(id));
   ipcMain.handle('agent:run', async (event, payload) => runAgent(payload, event.sender));
   ipcMain.handle('agent:cancel', async (_event, runId) => cancelAgent(runId));
   ipcMain.handle('research:recover-run', async (_event, payload) => {

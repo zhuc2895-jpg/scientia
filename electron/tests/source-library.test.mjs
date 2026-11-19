@@ -58,7 +58,7 @@ test('BibTeX import parses multiple entries and preserves stable identifiers', (
   assert.equal(records[0].year, 2024);
   assert.equal(records[0].doi, '10.1000/abc');
   assert.equal(records[0].stableIdentifier, 'doi:10.1000/abc');
-  assert.equal(records[1].stableIdentifier, 'bibtex:lee2021book');
+  assert.equal(records[1].stableIdentifier, null);
 });
 
 test('RIS import parses journal metadata and DOI', () => {
@@ -126,5 +126,41 @@ test('duplicate matching uses stable identifiers before normalized title and yea
     doi: null,
     url: null,
     stableIdentifier: null,
+  }, existing), null);
+});
+
+test('BibTeX citation keys are not stable identifiers across records', () => {
+  const records = parseBibTeX(`
+@article{same,
+  title = {Alpha Study},
+  year = {2020}
+}
+
+@article{same,
+  title = {Beta Study},
+  year = {2021}
+}
+`);
+
+  assert.equal(records.length, 2);
+  assert.equal(records[0].stableIdentifier, null);
+  assert.equal(records[1].stableIdentifier, null);
+  assert.equal(findDuplicateSource(records[1], [records[0]]), null);
+});
+
+test('different stable identifiers are not collapsed by matching title and year', () => {
+  const existing = [{
+    id: 'source-alpha',
+    title: 'Same Display Title',
+    year: 2024,
+    doi: '10.1000/alpha',
+    stableIdentifier: 'doi:10.1000/alpha',
+  }];
+
+  assert.equal(findDuplicateSource({
+    title: 'Same Display Title',
+    year: 2024,
+    doi: '10.1000/beta',
+    stableIdentifier: 'doi:10.1000/beta',
   }, existing), null);
 });
