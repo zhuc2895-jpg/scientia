@@ -7,6 +7,7 @@ import {
   currentApprovedResearchCharter,
   currentResearchCharter,
   normalizeResearchCharterState,
+  researchCharterFieldsEqual,
   saveResearchCharterDraft,
 } from '../../app/research-charter.js';
 
@@ -117,6 +118,20 @@ test('editing an approved charter creates a re-approval revision and retains his
   state = approveResearchCharter(state, { approvedAt: '2026-11-19T08:04:00.000Z' });
   assert.equal(currentApprovedResearchCharter(state).version, 4);
   assert.equal(state.revisions.length, 4);
+});
+
+test('charter field comparison ignores revision metadata and surrounding whitespace', () => {
+  const approved = {
+    ...charter(),
+    version: 7,
+    status: 'approved',
+    supersedes: 6,
+    generatedByRunId: 'run-approved-charter',
+  };
+  const edited = charter({ question: '  How does intermittent fasting affect metabolic health?  ' });
+
+  assert.equal(researchCharterFieldsEqual(approved, edited), true);
+  assert.equal(researchCharterFieldsEqual(approved, charter({ scope: 'A different scope.' })), false);
 });
 
 

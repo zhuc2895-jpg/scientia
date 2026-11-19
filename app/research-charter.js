@@ -220,6 +220,12 @@ export function setCurrentResearchCharterContentHash(state, contentHash) {
 }
 
 
+export function researchCharterFieldsEqual(left, right) {
+  const leftFields = normalizeFields(left, { strict: true });
+  const rightFields = normalizeFields(right, { strict: true });
+  return FIELD_KEYS.every((key) => leftFields[key] === rightFields[key]);
+}
+
 export function researchCharterContentString(value) {
   const fields = normalizeFields(value, { strict: true });
   return JSON.stringify({

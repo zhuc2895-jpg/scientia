@@ -19,7 +19,7 @@ import { removeManagedProjectWorkspace } from './project-workspace.js';
 import { pathKey } from './path-boundary.js';
 import { createConfigStore } from './config-store.js';
 import { createResearchProjectLifecycle } from './research-project-lifecycle.js';
-import { researchCharterContentString } from '../app/research-charter.js';
+import { researchCharterContentString, researchCharterFieldsEqual } from '../app/research-charter.js';
 import { evaluateResearchRunPolicy } from '../app/research-run-policy.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
@@ -392,23 +392,23 @@ async function findVerifiedCharterDraftArtifact({ runId, projectId }) {
   if (typeof runId !== 'string' || !runId || typeof projectId !== 'string' || !projectId) return false;
   // ponytail: bounded run-directory scan; index Charter drafts by run ID if run volume grows.
   const runsRoot = path.join(currentProjectWorkspace(), '.science', 'runs');
-  let sessions;
+  let conversations;
   try {
-    sessions = await fs.readdir(runsRoot, { withFileTypes: true });
+    conversations = await fs.readdir(runsRoot, { withFileTypes: true });
   } catch {
     return null;
   }
-  for (const session of sessions.filter((entry) => entry.isDirectory()).slice(0, 500)) {
-    const sessionPath = path.join(runsRoot, session.name);
+  for (const conversation of conversations.filter((entry) => entry.isDirectory()).slice(0, 500)) {
+    const conversationPath = path.join(runsRoot, conversation.name);
     let runs;
     try {
-      runs = await fs.readdir(sessionPath, { withFileTypes: true });
+      runs = await fs.readdir(conversationPath, { withFileTypes: true });
     } catch {
       continue;
     }
     for (const run of runs.filter((entry) => entry.isDirectory()).slice(0, 500)) {
       try {
-        const manifest = JSON.parse(await fs.readFile(path.join(sessionPath, run.name, 'manifest.json'), 'utf8'));
+        const manifest = JSON.parse(await fs.readFile(path.join(conversationPath, run.name, 'manifest.json'), 'utf8'));
         if (manifest.runId !== runId) continue;
         const charterArtifact = Array.isArray(manifest.artifacts) && manifest.artifacts.find((artifact) => (
           String(artifact.path || artifact.relativePath || artifact.name || '').endsWith('research-charter.json')
@@ -436,7 +436,7 @@ async function findVerifiedCharterDraftArtifact({ runId, projectId }) {
 
 async function confirmApprovedCharterChange(current, nextCharter) {
   if (current?.status !== 'approved'
-    || researchCharterContentString(current) === researchCharterContentString(nextCharter)) return;
+    || researchCharterFieldsEqual(current, nextCharter)) return;
   const confirmation = await dialog.showMessageBox(mainWindow, {
     type: 'warning',
     title: 'Change approved Research Charter',

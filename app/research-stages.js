@@ -246,6 +246,9 @@ export function reopenResearchStage(state, stageKey, { reopenedAt = new Date().t
   if (normalized.stages[key]?.status !== 'completed') {
     throw new Error('只有已完成阶段可以重新进入。');
   }
+  if (normalized.currentStageKey === SCOPING_STAGE_KEY) {
+    throw new Error('Research Charter 必须在 Scoping Gate 重新批准后才能进入后续阶段。');
+  }
   return {
     ...normalized,
     currentStageKey: key,
@@ -286,7 +289,9 @@ export function buildResearchStageGraph(value, { charterApproved = false, charte
       isCurrent,
       isCompleted,
       isNotApplicable,
-      canReopen: isCompleted && REOPENABLE_STAGE_KEYS.has(definition.key),
+      canReopen: isCompleted
+        && REOPENABLE_STAGE_KEYS.has(definition.key)
+        && state.currentStageKey !== SCOPING_STAGE_KEY,
       isLocked: status === 'pending',
       lockReason,
       completedAt: record?.completedAt || null,

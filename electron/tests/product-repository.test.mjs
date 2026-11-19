@@ -832,7 +832,10 @@ test('editing an approved Research Charter creates a revision and requires re-ap
   assert.equal(state.project.charter.current.status, 'draft');
   assert.equal(state.project.charter.needsReapproval, true);
   assert.equal(state.project.charter.approved, null);
+  assert.equal(state.project.stageGraph.stages[1].canReopen, false);
   assert.throws(() => repository.completeResearchStage('scoping'), /Charter/);
+  assert.throws(() => repository.reopenResearchStage('evidence'), /Charter|Scoping/);
+  assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'scoping');
 
   state = repository.approveResearchCharter({ charter: revised });
   assert.equal(state.project.stageGraph.currentStageKey, 'inquiry');

@@ -564,9 +564,11 @@ function renderResearchStages() {
         : stage.isCompleted
           ? stage.key === 'scoping' && stage.charterVersion
             ? `Research Charter v${stage.charterVersion} 已批准；点击可查看当前 Charter。`
-            : stage.canReopen
-              ? '点击可重新进入该阶段并开展迭代复核。'
-              : '该阶段已完成并冻结。'
+            : graph.currentStageKey === 'scoping' && stage.key !== 'scoping'
+              ? '已暂停；重新批准 Research Charter 后才能进入后续阶段。'
+              : stage.canReopen
+                ? '点击可重新进入该阶段并开展迭代复核。'
+                : '该阶段已完成并冻结。'
           : stage.lockReason;
     const stateIcon = stage.isCurrent
       ? '<span class="stage-current-pip" aria-hidden="true"></span>'
