@@ -615,6 +615,8 @@ async function runAgent(payload, sender) {
     localLocator: source.localLocator,
     contentHash: source.contentHash,
     acquiredAt: source.acquiredAt,
+    verificationState: source.verificationState,
+    freshnessState: source.freshnessState,
   }));
   const enrichedPayload = {
     ...payload,

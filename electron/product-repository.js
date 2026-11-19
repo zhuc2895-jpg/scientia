@@ -39,6 +39,8 @@ const DEFAULT_PROJECT_BOOTSTRAP_KEY = 'default_project_bootstrap_v1';
 const DEFAULT_PROJECT_ID = 'scientia-default-project';
 const WORKSPACE_KINDS = new Set(['managed', 'imported']);
 const SOURCE_KINDS = new Set(['pdf', 'markdown', 'tex', 'bibtex', 'ris', 'doi', 'url']);
+const VERIFICATION_STATES = new Set(['verified', 'partial', 'unverified']);
+const FRESHNESS_STATES = new Set(['current', 'stale']);
 
 function parseJsonObject(value) {
   try {
@@ -74,6 +76,8 @@ function deserializeSource(row) {
     citekey: row.citekey || null,
     bibtex: row.bibtex || null,
     cslJson: parseJsonObject(row.csl_json),
+    verificationState: VERIFICATION_STATES.has(row.verification_state) ? row.verification_state : 'unverified',
+    freshnessState: FRESHNESS_STATES.has(row.freshness_state) ? row.freshness_state : 'current',
     metadata: parseJsonObject(row.metadata_json),
   };
 }
@@ -121,6 +125,8 @@ function normalizeSourceRecord(value = {}) {
     citekey: typeof value.citekey === 'string' && value.citekey.trim() ? value.citekey.trim().slice(0, 200) : null,
     bibtex: typeof value.bibtex === 'string' && value.bibtex.trim() ? value.bibtex.trim().slice(0, 50000) : null,
     cslJson: value.cslJson && typeof value.cslJson === 'object' && !Array.isArray(value.cslJson) ? value.cslJson : {},
+    verificationState: VERIFICATION_STATES.has(value.verificationState) ? value.verificationState : 'unverified',
+    freshnessState: FRESHNESS_STATES.has(value.freshnessState) ? value.freshnessState : 'current',
     metadata: value.metadata && typeof value.metadata === 'object' && !Array.isArray(value.metadata) ? value.metadata : {},
   };
 }
@@ -224,6 +230,8 @@ export function openProductRepository({ databasePath }) {
       citekey TEXT,
       bibtex TEXT,
       csl_json TEXT NOT NULL DEFAULT '{}',
+      verification_state TEXT NOT NULL DEFAULT 'unverified',
+      freshness_state TEXT NOT NULL DEFAULT 'current',
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -247,6 +255,12 @@ export function openProductRepository({ databasePath }) {
   }
   if (!sourceColumns.some((column) => column.name === 'csl_json')) {
     database.exec("ALTER TABLE sources ADD COLUMN csl_json TEXT NOT NULL DEFAULT '{}'");
+  }
+  if (!sourceColumns.some((column) => column.name === 'verification_state')) {
+    database.exec("ALTER TABLE sources ADD COLUMN verification_state TEXT NOT NULL DEFAULT 'unverified'");
+  }
+  if (!sourceColumns.some((column) => column.name === 'freshness_state')) {
+    database.exec("ALTER TABLE sources ADD COLUMN freshness_state TEXT NOT NULL DEFAULT 'current'");
   }
   const projectColumns = database.prepare('PRAGMA table_info(projects)').all();
   if (!projectColumns.some((column) => column.name === 'workspace_kind')) {
@@ -343,17 +357,19 @@ export function openProductRepository({ databasePath }) {
     INSERT INTO sources (
       id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
       stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json,
-      metadata_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      verification_state, freshness_state, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectSources = database.prepare(`
     SELECT id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
-           stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json, metadata_json
+           stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json,
+           verification_state, freshness_state, metadata_json
     FROM sources WHERE project_id = ? ORDER BY acquired_at DESC, title ASC, id ASC
   `);
   const selectSourceForProject = database.prepare(`
     SELECT id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
-           stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json, metadata_json
+           stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json,
+           verification_state, freshness_state, metadata_json
     FROM sources WHERE id = ? AND project_id = ?
   `);
   const selectSourceById = database.prepare('SELECT id, project_id FROM sources WHERE id = ?');
@@ -1000,6 +1016,8 @@ export function openProductRepository({ databasePath }) {
           source.citekey,
           source.bibtex,
           JSON.stringify(source.cslJson),
+          source.verificationState,
+          source.freshnessState,
           JSON.stringify(source.metadata),
           createdAt,
         );

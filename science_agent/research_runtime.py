@@ -650,6 +650,22 @@ def assess_result(
     }
 
 
+def _source_audit_snapshot(sources: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    snapshot: list[dict[str, Any]] = []
+    for source in sources or []:
+        if not isinstance(source, dict):
+            continue
+        snapshot.append({
+            key: source.get(key)
+            for key in (
+                "id", "title", "doi", "url", "stableIdentifier", "localLocator",
+                "contentHash", "acquiredAt", "verificationState", "freshnessState",
+            )
+            if source.get(key) is not None
+        })
+    return snapshot
+
+
 def finalize_research_run(
     workspace: Path,
     *,
@@ -705,6 +721,10 @@ def finalize_research_run(
         "artifacts": artifacts,
         "evidenceAfter": len(evidence_after),
         "evidenceAdded": evidence_added,
+        "sourceScope": {
+            "registered": _source_audit_snapshot(registered_sources),
+            "active": _source_audit_snapshot(active_sources),
+        },
         "quality": quality,
     })
     _write_json(manifest_path, manifest)

@@ -1046,6 +1046,24 @@ test('adding a source after Evidence revokes freeze by returning the project to 
   assert.deepEqual(stageGraph.nextAction.allowedActions, ['complete']);
 });
 
+test('source records initialize verification and freshness states', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  assert.equal(repository.getSource('source-1').verificationState, 'unverified');
+  assert.equal(repository.getSource('source-1').freshnessState, 'current');
+
+  repository.close();
+  repository = openTestRepository(databasePath);
+  assert.equal(repository.getSource('source-1').verificationState, 'unverified');
+  assert.equal(repository.getSource('source-1').freshnessState, 'current');
+});
+
 test('source records preserve BibTeX and CSL JSON metadata', (t) => {
   const { directory, databasePath } = temporaryDatabase();
   let repository = openTestRepository(databasePath);
