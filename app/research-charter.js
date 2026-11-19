@@ -13,7 +13,7 @@ export const DATA_POLICIES = Object.freeze(['standard', 'sensitive', 'local-only
 const FIELD_KEYS = RESEARCH_CHARTER_FIELDS.map((field) => field.key);
 const FIELD_CONFIG = new Map(RESEARCH_CHARTER_FIELDS.map((field) => [field.key, field]));
 const REVISION_STATUSES = new Set(['draft', 'approved']);
-const REVISION_SOURCES = new Set(['agent', 'user']);
+const REVISION_ORIGINS = new Set(['agent', 'user']);
 
 function normalizeTimestamp(value) {
   if (typeof value !== 'string' || !value.trim()) return null;
@@ -51,7 +51,9 @@ function normalizeRevision(value) {
   const createdAt = normalizeTimestamp(value.createdAt);
   const updatedAt = normalizeTimestamp(value.updatedAt) || createdAt;
   if (!createdAt || !updatedAt) return null;
-  const source = REVISION_SOURCES.has(value.source) ? value.source : 'user';
+  const revisionOrigin = REVISION_ORIGINS.has(value.revisionOrigin)
+    ? value.revisionOrigin
+    : REVISION_ORIGINS.has(value.source) ? value.source : 'user';
   const approvedAt = value.status === 'approved' ? normalizeTimestamp(value.approvedAt) || updatedAt : null;
   const supersedes = Number.isInteger(Number(value.supersedes)) && Number(value.supersedes) > 0
     ? Number(value.supersedes)
@@ -60,7 +62,7 @@ function normalizeRevision(value) {
     ...fields,
     version,
     status: value.status,
-    source,
+    revisionOrigin,
     createdAt,
     updatedAt,
     approvedAt,
@@ -125,14 +127,14 @@ export function charterNeedsReapproval(state) {
 }
 
 export function saveResearchCharterDraft(state, value, {
-  source = 'user',
+  revisionOrigin = 'user',
   updatedAt = new Date().toISOString(),
   generatedByRunId = null,
 } = {}) {
   const normalized = normalizeResearchCharterState(state);
   const fields = normalizeFields(value, { strict: true });
   const timestamp = normalizeTimestamp(updatedAt) || new Date().toISOString();
-  const revisionSource = REVISION_SOURCES.has(source) ? source : 'user';
+  const normalizedOrigin = REVISION_ORIGINS.has(revisionOrigin) ? revisionOrigin : 'user';
   const normalizedRunId = typeof generatedByRunId === 'string' && generatedByRunId.trim()
     ? generatedByRunId.trim()
     : null;
@@ -143,7 +145,7 @@ export function saveResearchCharterDraft(state, value, {
       ...fields,
       version: 1,
       status: 'draft',
-      source: revisionSource,
+      revisionOrigin: normalizedOrigin,
       createdAt: timestamp,
       updatedAt: timestamp,
       approvedAt: null,
@@ -157,14 +159,14 @@ export function saveResearchCharterDraft(state, value, {
 
   const unchanged = FIELD_KEYS.every((key) => current[key] === fields[key]);
   if (current.status === 'draft') {
-    const agentTakesOverUserDraft = revisionSource === 'agent' && current.source === 'user';
+    const agentTakesOverUserDraft = normalizedOrigin === 'agent' && current.revisionOrigin === 'user';
     if (unchanged && !agentTakesOverUserDraft) return normalized;
     if (agentTakesOverUserDraft) {
       const revision = {
         ...fields,
         version: current.version + 1,
         status: 'draft',
-        source: 'agent',
+        revisionOrigin: 'agent',
         createdAt: timestamp,
         updatedAt: timestamp,
         approvedAt: null,
@@ -182,7 +184,7 @@ export function saveResearchCharterDraft(state, value, {
     const revision = {
       ...current,
       ...fields,
-      source: revisionSource,
+      revisionOrigin: normalizedOrigin,
       updatedAt: timestamp,
       generatedByRunId: normalizedRunId || current.generatedByRunId || null,
       contentHash: null,
@@ -198,7 +200,7 @@ export function saveResearchCharterDraft(state, value, {
     ...fields,
     version: current.version + 1,
     status: 'draft',
-    source: revisionSource,
+    revisionOrigin: normalizedOrigin,
     createdAt: timestamp,
     updatedAt: timestamp,
     approvedAt: null,

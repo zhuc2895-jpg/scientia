@@ -28,7 +28,7 @@ function charter(overrides = {}) {
 
 test('a draft charter requires every field and normalizes its values', () => {
   const state = saveResearchCharterDraft(undefined, charter({ question: '  What works?  ' }), {
-    source: 'agent',
+    revisionOrigin: 'agent',
     updatedAt: timestamp,
     generatedByRunId: 'run-charter-draft',
   });
@@ -37,12 +37,36 @@ test('a draft charter requires every field and normalizes its values', () => {
   assert.equal(current.version, 1);
   assert.equal(current.status, 'draft');
   assert.equal(current.question, 'What works?');
-  assert.equal(current.source, 'agent');
+  assert.equal(current.revisionOrigin, 'agent');
   assert.equal(current.generatedByRunId, 'run-charter-draft');
   assert.equal(current.createdAt, timestamp);
   assert.equal(currentApprovedResearchCharter(state), null);
   assert.throws(() => saveResearchCharterDraft(state, charter({ scope: '' }), { updatedAt: timestamp }), /scope|范围/);
   assert.throws(() => saveResearchCharterDraft(state, charter({ dataPolicy: 'public' }), { updatedAt: timestamp }), /数据处理政策/);
+});
+
+
+test('revision authorship uses revisionOrigin and accepts legacy source values', () => {
+  let state = saveResearchCharterDraft(undefined, charter(), {
+    revisionOrigin: 'agent',
+    updatedAt: timestamp,
+    generatedByRunId: 'run-revision-origin',
+  });
+  assert.equal(currentResearchCharter(state).revisionOrigin, 'agent');
+  assert.equal(currentResearchCharter(state).source, undefined);
+
+  state = normalizeResearchCharterState({
+    currentVersion: 1,
+    revisions: [{
+      ...charter(),
+      version: 1,
+      status: 'draft',
+      source: 'user',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }],
+  });
+  assert.equal(currentResearchCharter(state).revisionOrigin, 'user');
 });
 
 test('editing a draft updates it without creating a new version', () => {
@@ -73,7 +97,7 @@ test('editing an approved charter creates a re-approval revision and retains his
   let state = saveResearchCharterDraft(undefined, charter(), { updatedAt: timestamp });
   state = approveResearchCharter(state, { approvedAt: '2026-11-19T08:02:00.000Z' });
   state = saveResearchCharterDraft(state, charter({ question: 'Which fasting protocol works?' }), {
-    source: 'user',
+    revisionOrigin: 'user',
     updatedAt: '2026-11-19T08:03:00.000Z',
   });
 
@@ -94,17 +118,17 @@ test('editing an approved charter creates a re-approval revision and retains his
 
 test('a later agent draft creates a new revision after a user-edited reapproval draft', () => {
   let state = saveResearchCharterDraft(undefined, charter(), {
-    source: 'agent',
+    revisionOrigin: 'agent',
     updatedAt: timestamp,
     generatedByRunId: 'run-draft-1',
   });
   state = approveResearchCharter(state, { approvedAt: '2026-11-19T08:02:00.000Z' });
   state = saveResearchCharterDraft(state, charter({ question: 'User revised question.' }), {
-    source: 'user',
+    revisionOrigin: 'user',
     updatedAt: '2026-11-19T08:03:00.000Z',
   });
   state = saveResearchCharterDraft(state, charter({ question: 'Agent revised question.' }), {
-    source: 'agent',
+    revisionOrigin: 'agent',
     updatedAt: '2026-11-19T08:04:00.000Z',
     generatedByRunId: 'run-draft-2',
   });
@@ -123,18 +147,18 @@ test('a later agent draft creates a new revision after a user-edited reapproval 
 
 test('an identical agent draft still records agent provenance over a user draft', () => {
   let state = saveResearchCharterDraft(undefined, charter(), {
-    source: 'user',
+    revisionOrigin: 'user',
     updatedAt: timestamp,
   });
   state = saveResearchCharterDraft(state, charter(), {
-    source: 'agent',
+    revisionOrigin: 'agent',
     updatedAt: '2026-11-19T08:05:00.000Z',
     generatedByRunId: 'run-identical-agent-draft',
   });
 
   assert.equal(state.revisions.length, 2);
-  assert.equal(state.revisions[0].source, 'user');
-  assert.equal(currentResearchCharter(state).source, 'agent');
+  assert.equal(state.revisions[0].revisionOrigin, 'user');
+  assert.equal(currentResearchCharter(state).revisionOrigin, 'agent');
   assert.equal(currentResearchCharter(state).generatedByRunId, 'run-identical-agent-draft');
 });
 

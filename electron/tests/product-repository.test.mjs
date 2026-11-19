@@ -36,7 +36,7 @@ function approveTestCharter(repository, overrides = {}) {
   const fields = charter(overrides);
   repository.saveResearchCharterDraft({
     charter: fields,
-    source: 'agent',
+    revisionOrigin: 'agent',
     generatedByRunId: 'test-agent-draft',
   });
   return repository.approveResearchCharter({ charter: fields });
@@ -559,6 +559,40 @@ test('research stages persist completed and not-applicable state across restarts
   assert.equal(restored.progress.notApplicable, 1);
 });
 
+
+test('legacy Scoping skips cannot bypass the approved Charter gate', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const first = openTestRepository(databasePath);
+  const projectId = first.loadState().activeProjectId;
+  first.close();
+
+  const timestamp = '2026-11-18T10:00:00.000Z';
+  const database = new DatabaseSync(databasePath);
+  database.prepare(`
+    UPDATE projects
+    SET current_stage_key = 'evidence', research_stage_states_json = ?
+    WHERE id = ?
+  `).run(JSON.stringify({
+    scoping: {
+      status: 'not-applicable',
+      updatedAt: timestamp,
+      notApplicableReason: 'Legacy skipped Scoping.',
+    },
+  }), projectId);
+  database.close();
+
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const state = repository.loadState();
+  assert.equal(state.project.charter.approved, null);
+  assert.equal(state.project.stageGraph.currentStageKey, 'scoping');
+  assert.throws(() => repository.completeResearchStage('evidence'), /当前阶段/);
+});
+
 test('research stage state is project-scoped and completed stages can be revisited', (t) => {
   const { directory, databasePath } = temporaryDatabase();
   const repository = openTestRepository(databasePath);
@@ -712,10 +746,10 @@ test('Scoping cannot advance or be skipped without an approved Research Charter'
     /Charter/,
   );
 
-  let state = repository.saveResearchCharterDraft({ charter: charter(), source: 'agent', generatedByRunId: 'run-scoping-1' });
+  let state = repository.saveResearchCharterDraft({ charter: charter(), revisionOrigin: 'agent', generatedByRunId: 'run-scoping-1' });
   assert.equal(state.project.charter.current.version, 1);
   assert.equal(state.project.charter.current.status, 'draft');
-  assert.equal(state.project.charter.current.source, 'agent');
+  assert.equal(state.project.charter.current.revisionOrigin, 'agent');
   assert.equal(state.project.charter.current.generatedByRunId, 'run-scoping-1');
   assert.throws(() => repository.completeResearchStage('scoping'), /Charter/);
 
@@ -739,7 +773,7 @@ test('Research Charter approval requires an agent-drafted revision', (t) => {
   });
 
   const fields = charter();
-  repository.saveResearchCharterDraft({ charter: fields, source: 'user' });
+  repository.saveResearchCharterDraft({ charter: fields, revisionOrigin: 'user' });
 
   assert.throws(
     () => repository.approveResearchCharter({ charter: fields }),
@@ -761,7 +795,7 @@ test('editing an approved Research Charter creates a revision and requires re-ap
   assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'inquiry');
 
   const revised = charter({ question: 'Which protocol has the strongest reproducibility evidence?' });
-  let state = repository.saveResearchCharterDraft({ charter: revised, source: 'user' });
+  let state = repository.saveResearchCharterDraft({ charter: revised, revisionOrigin: 'user' });
 
   assert.equal(state.project.stageGraph.currentStageKey, 'scoping');
   assert.equal(state.project.stageGraph.stages[1].status, 'completed');
@@ -793,7 +827,7 @@ test('approved Research Charter revisions survive repository restart for later r
   const fields = charter({ dataPolicy: 'sensitive', citationStyle: 'APA 7' });
   repository.saveResearchCharterDraft({
     charter: fields,
-    source: 'agent',
+    revisionOrigin: 'agent',
     generatedByRunId: 'run-restart-charter',
   });
   repository.approveResearchCharter({ charter: fields });

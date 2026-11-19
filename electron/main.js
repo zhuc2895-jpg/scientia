@@ -19,7 +19,7 @@ import { removeManagedProjectWorkspace } from './project-workspace.js';
 import { pathKey } from './path-boundary.js';
 import { createConfigStore } from './config-store.js';
 import { createResearchProjectLifecycle } from './research-project-lifecycle.js';
-import { evaluateResearchRunPolicy } from '../app/research-run-policy.js';
+import { researchCharterContentString } from '../app/research-charter.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -387,6 +387,52 @@ async function importFiles(workspaceInput, tokens) {
   return imported;
 }
 
+async function verifyCharterDraftProvenance({ runId, projectId }) {
+  if (typeof runId !== 'string' || !runId || typeof projectId !== 'string' || !projectId) return false;
+  // ponytail: bounded run-directory scan; index Charter drafts by run ID if run volume grows.
+  const runsRoot = path.join(currentProjectWorkspace(), '.science', 'runs');
+  let sessions;
+  try {
+    sessions = await fs.readdir(runsRoot, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const session of sessions.filter((entry) => entry.isDirectory()).slice(0, 500)) {
+    const sessionPath = path.join(runsRoot, session.name);
+    let runs;
+    try {
+      runs = await fs.readdir(sessionPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const run of runs.filter((entry) => entry.isDirectory()).slice(0, 500)) {
+      try {
+        const manifest = JSON.parse(await fs.readFile(path.join(sessionPath, run.name, 'manifest.json'), 'utf8'));
+        if (manifest.runId !== runId) continue;
+        const charterArtifact = Array.isArray(manifest.artifacts) && manifest.artifacts.find((artifact) => (
+          String(artifact.path || artifact.relativePath || artifact.name || '').endsWith('research-charter.json')
+        ));
+        if (
+          manifest.status === 'completed'
+          && manifest.stageKey === 'scoping'
+          && manifest.projectId === projectId
+          && manifest.charterDraftMode === true
+          && !manifest.researchCharter
+          && charterArtifact
+        ) {
+          return {
+            artifactPath: String(charterArtifact.path || charterArtifact.relativePath || charterArtifact.name),
+          };
+        }
+        return null;
+      } catch {
+        // Ignore malformed or unrelated run records.
+      }
+    }
+  }
+  return null;
+}
+
 async function runAgent(payload, sender) {
   if (!runtimeManager) throw new Error('Science Agent runtime is not ready.');
   const state = productRepository.loadState();
@@ -396,33 +442,16 @@ async function runAgent(payload, sender) {
     throw new Error('只能运行当前 Research Project 中的 Conversation。');
   }
   const stageKey = state.project?.stageGraph?.currentStageKey || null;
-  const policyDecision = evaluateResearchRunPolicy({
-    stageKey,
-    charter: state.project?.charter,
-  });
-  if (!policyDecision.allowed) {
-    if (policyDecision.requiresConfirmation) {
-      const confirmation = await dialog.showMessageBox(mainWindow, {
-        type: 'warning',
-        title: '确认外部数据传输',
-        message: '当前 Research Charter 使用 sensitive Data Processing Policy。',
-        detail: '本轮 Research Run 会把任务上下文与选定资料发送给外部 Model Provider。是否继续？',
-        buttons: ['取消', '继续'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true,
-      });
-      if (confirmation.response !== 1) throw new Error('用户取消了敏感资料的外部传输。');
-    } else {
-      throw new Error(policyDecision.message);
-    }
+  const approvedCharter = state.project?.charter?.approved || null;
+  if (stageKey !== 'scoping' && !approvedCharter) {
+    throw new Error('进入 Evidence 后，Research Run 必须引用当前 approved Research Charter。');
   }
   const enrichedPayload = {
     ...payload,
     projectId: state.activeProjectId,
     stageKey,
-    researchCharter: policyDecision.approvedCharter,
-    charterDraftMode: policyDecision.charterDraftMode,
+    researchCharter: approvedCharter,
+    charterDraftMode: stageKey === 'scoping' && !approvedCharter,
   };
   return runtimeManager.run(enrichedPayload, sender, researchWorkspace);
 }
@@ -517,13 +546,27 @@ function installIpc() {
     });
   });
 
-  ipcMain.handle('project:charter-save-draft', (_event, payload) => {
-    const source = payload?.source === 'agent' ? 'agent' : 'user';
-    if (source !== 'agent') assertNoActiveResearchRun();
+  ipcMain.handle('project:charter-save-draft', async (_event, payload) => {
+    const revisionOrigin = payload?.revisionOrigin === 'agent' ? 'agent' : 'user';
+    const generatedByRunId = typeof payload?.generatedByRunId === 'string' ? payload.generatedByRunId : null;
+    if (revisionOrigin === 'agent') {
+      const provenance = await verifyCharterDraftProvenance({
+        runId: generatedByRunId,
+        projectId: productRepository.loadState().activeProjectId,
+      });
+      if (!provenance) throw new Error('Science Agent Charter provenance could not be verified from a completed Scoping run.');
+      const artifactPath = await resolveWorkspaceEntry(currentProjectWorkspace(), provenance.artifactPath);
+      const artifactCharter = JSON.parse(await fs.readFile(artifactPath, 'utf8'));
+      if (researchCharterContentString(artifactCharter) !== researchCharterContentString(payload?.charter)) {
+        throw new Error('Research Charter content does not match the Science Agent draft artifact.');
+      }
+    } else {
+      assertNoActiveResearchRun();
+    }
     return productRepository.saveResearchCharterDraft({
       charter: payload?.charter,
-      source,
-      generatedByRunId: typeof payload?.generatedByRunId === 'string' ? payload.generatedByRunId : null,
+      revisionOrigin,
+      generatedByRunId,
     });
   });
   ipcMain.handle('project:charter-approve', (_event, payload) => {

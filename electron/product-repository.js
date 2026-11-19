@@ -220,6 +220,9 @@ export function openProductRepository({ databasePath }) {
       stages,
     });
     const approved = currentApprovedResearchCharter(charterState);
+    if (!approved && normalized.stages.scoping?.status === 'not-applicable') {
+      return { currentStageKey: 'scoping', stages: {} };
+    }
     if (!approved && normalized.currentStageKey !== 'scoping') {
       return { ...normalized, currentStageKey: 'scoping' };
     }
@@ -468,13 +471,13 @@ export function openProductRepository({ databasePath }) {
     return loadState();
   }
 
-  function saveResearchCharterDraftRecord({ charter, source = 'user', generatedByRunId = null } = {}) {
+  function saveResearchCharterDraftRecord({ charter, revisionOrigin = 'user', generatedByRunId = null } = {}) {
     assertOpen();
     const project = assertActiveProject();
     const previousCharter = researchCharterStateForRow(project);
     const previousCurrent = currentResearchCharter(previousCharter);
     const nextCharter = saveCharterDraftState(previousCharter, charter, {
-      source,
+      revisionOrigin,
       updatedAt: new Date().toISOString(),
       generatedByRunId,
     });
@@ -503,7 +506,7 @@ export function openProductRepository({ databasePath }) {
     const previousStageState = researchStageStateForRow(project, previousCharter);
     const timestamp = new Date().toISOString();
     const drafted = saveCharterDraftState(previousCharter, charter, {
-      source: 'user',
+      revisionOrigin: 'user',
       updatedAt: timestamp,
     });
     if (!currentResearchCharter(drafted)?.generatedByRunId) {

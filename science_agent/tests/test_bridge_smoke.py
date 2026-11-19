@@ -201,6 +201,7 @@ class BridgeSmokeTests(unittest.TestCase):
             saved = json.loads(manifest.read_text(encoding="utf-8"))
             self.assertEqual(saved["stageKey"], "scoping")
             self.assertEqual(saved["projectId"], "project-charter-smoke")
+            self.assertTrue(saved["charterDraftMode"])
 
 
 if __name__ == "__main__":

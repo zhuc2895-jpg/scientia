@@ -684,7 +684,7 @@ function renderResearchCharterDialog() {
         <div class="charter-revision-row">
           <strong>v${revision.version}</strong>
           <span class="charter-revision-status ${escapeHTML(revision.status)}">${revision.status === 'approved' ? '已批准' : '草稿'}</span>
-          <span>${revision.source === 'agent' ? 'Science Agent 起草' : '用户编辑'}</span>
+          <span>${revision.revisionOrigin === 'agent' ? 'Science Agent 起草' : '用户编辑'}</span>
           <time>${escapeHTML(formatTime(revision.updatedAt))}</time>
         </div>`).join('')
     : '<div class="charter-revision-empty">批准或保存修订后，这里会保留版本历史。</div>';
@@ -735,7 +735,7 @@ async function saveResearchCharterDraftFromGate({ closeAfter = false } = {}) {
   els.charterApprove.disabled = true;
   els.charterSaveDraft.textContent = '正在保存…';
   try {
-    const productState = await bridge.projectCharterSaveDraft({ charter: validation.values, source: 'user' });
+    const productState = await bridge.projectCharterSaveDraft({ charter: validation.values, revisionOrigin: 'user' });
     applyProductState(productState);
     renderAll();
     renderResearchCharterDialog();
@@ -1377,7 +1377,7 @@ async function completeRun(event) {
     try {
       const productState = await bridge.projectCharterSaveDraft({
         charter: event.charterDraft,
-        source: 'agent',
+        revisionOrigin: 'agent',
         generatedByRunId: run.runId,
       });
       applyProductState(productState);
@@ -2246,11 +2246,11 @@ function createPreviewBridge() {
       previewConfig.workspace = previewProject()?.workspacePath || '';
       return { ...previewProductState(), deletedProject };
     },
-    async projectCharterSaveDraft({ charter, source = 'user', generatedByRunId = null }) {
+    async projectCharterSaveDraft({ charter, revisionOrigin = 'user', generatedByRunId = null }) {
       const previous = normalizeResearchCharterState(previewCharterStates.get(previewActiveProjectId) || createInitialResearchCharterState());
       const previousCurrent = currentResearchCharter(previous);
       const next = saveResearchCharterDraft(previous, charter, {
-        source,
+        revisionOrigin,
         updatedAt: new Date().toISOString(),
         generatedByRunId,
       });
@@ -2267,7 +2267,10 @@ function createPreviewBridge() {
     async projectCharterApprove({ charter }) {
       const previous = normalizeResearchCharterState(previewCharterStates.get(previewActiveProjectId) || createInitialResearchCharterState());
       const timestamp = new Date().toISOString();
-      const drafted = saveResearchCharterDraft(previous, charter, { source: 'user', updatedAt: timestamp });
+      const drafted = saveResearchCharterDraft(previous, charter, { revisionOrigin: 'user', updatedAt: timestamp });
+      if (!currentResearchCharter(drafted)?.generatedByRunId) {
+        throw new Error('Research Charter 必须由 Science Agent 起草后才能批准。');
+      }
       const approved = approveResearchCharter(drafted, { approvedAt: timestamp });
       previewCharterStates.set(previewActiveProjectId, approved);
       const current = previewStageStates.get(previewActiveProjectId) || createInitialResearchStageState();

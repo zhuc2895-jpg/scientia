@@ -157,6 +157,27 @@ class ResearchRuntimeTests(unittest.TestCase):
             self.assertEqual(extracted["question"], charter["question"])
             self.assertEqual(extracted["dataPolicy"], "standard")
 
+
+    def test_charter_draft_runs_use_a_scoping_only_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            context = prepare_research_run(
+                workspace,
+                conversation_id="conversation-scoping-only",
+                run_id="run-scoping-only",
+                prompt="Study intermittent fasting.",
+                model="deepseek-v4-flash",
+                stage_key="scoping",
+                charter_draft_mode=True,
+            )
+
+            brief = (workspace / context["briefPath"]).read_text(encoding="utf-8")
+            self.assertIn("Scoping-only Research Charter draft", brief)
+            self.assertNotIn("Append evidence records to the JSONL ledger", brief)
+            self.assertIn("Do not use web search or fetch", context["promptSuffix"])
+            self.assertIn("Do not append evidence records", context["promptSuffix"])
+            self.assertIn("Do not create reports, figures, tables, scripts, or datasets", context["promptSuffix"])
+
     def test_charter_extraction_falls_back_to_fenced_json_in_the_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)

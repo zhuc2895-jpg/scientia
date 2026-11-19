@@ -263,6 +263,39 @@ try {
   }
   assert.equal(smokeProjectState.project.name, 'Smoke Project');
   const workspace = smokeProjectState.project.workspacePath;
+  const smokeCharterDraft = {
+    question: 'How should the smoke-test evidence be interpreted?',
+    contribution: 'Verify the Scoping Gate.',
+    scope: 'Only synthetic project data.',
+    methodConstraints: 'Do not fabricate evidence.',
+    successCriteria: 'A traceable stage transition.',
+    paperType: 'Research article',
+    citationStyle: 'Vancouver',
+    dataPolicy: 'standard',
+  };
+  const charterDraftRunId = 'smoke-agent-charter-draft';
+  const charterArtifactDirectory = path.join(workspace, '.science', 'outputs', 'smoke');
+  mkdirSync(charterArtifactDirectory, { recursive: true });
+  writeFileSync(
+    path.join(charterArtifactDirectory, 'research-charter.json'),
+    JSON.stringify(smokeCharterDraft),
+    'utf8',
+  );
+  const charterDraftRunDirectory = path.join(workspace, '.science', 'runs', 'smoke-session', charterDraftRunId);
+  mkdirSync(charterDraftRunDirectory, { recursive: true });
+  writeFileSync(path.join(charterDraftRunDirectory, 'manifest.json'), JSON.stringify({
+    runId: charterDraftRunId,
+    projectId: smokeProjectState.activeProjectId,
+    status: 'completed',
+    stageKey: 'scoping',
+    charterDraftMode: true,
+    researchCharter: null,
+    artifacts: [{
+      name: 'research-charter.json',
+      path: '.science/outputs/smoke/research-charter.json',
+      relativePath: 'research-charter.json',
+    }],
+  }), 'utf8');
   const immutableBinding = await evaluate(cdp, `(async () => {
     const config = await window.scienceAgent.configLoad();
     return window.scienceAgent.configSave({ ...config, workspace: 'C:\\\\Research\\\\Other Project' })
@@ -281,20 +314,23 @@ try {
   assert.equal(await evaluate(cdp, `document.querySelector('[data-stage-card="evidence"]')?.classList.contains('pending')`), true);
   assert.match(await evaluate(cdp, `document.querySelector('[data-stage-card="evidence"]')?.title || ''`), /Scoping/);
   await evaluate(cdp, `(async () => {
-    const draft = {
-      question: 'How should the smoke-test evidence be interpreted?',
-      contribution: 'Verify the Scoping Gate.',
-      scope: 'Only synthetic project data.',
-      methodConstraints: 'Do not fabricate evidence.',
-      successCriteria: 'A traceable stage transition.',
-      paperType: 'Research article',
-      citationStyle: 'Vancouver',
-      dataPolicy: 'standard',
-    };
+    const draft = ${JSON.stringify(smokeCharterDraft)};
+    const forged = await window.scienceAgent.projectCharterSaveDraft({
+      charter: draft,
+      revisionOrigin: 'agent',
+      generatedByRunId: 'forged-charter-draft',
+    }).then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message }));
+    if (forged.ok) throw new Error('Forged Charter provenance was accepted.');
+    const tampered = await window.scienceAgent.projectCharterSaveDraft({
+      charter: { ...draft, question: 'Tampered Charter content.' },
+      revisionOrigin: 'agent',
+      generatedByRunId: ${JSON.stringify(charterDraftRunId)},
+    }).then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message }));
+    if (tampered.ok) throw new Error('Tampered Charter content was accepted.');
     await window.scienceAgent.projectCharterSaveDraft({
       charter: draft,
-      source: 'agent',
-      generatedByRunId: 'smoke-agent-charter-draft',
+      revisionOrigin: 'agent',
+      generatedByRunId: ${JSON.stringify(charterDraftRunId)},
     });
     document.querySelector('[data-stage-action="charter"]').click();
     document.querySelector('#charter-question').value = draft.question;
