@@ -260,6 +260,7 @@ export function createDaemonManager({
         ? payload.researchCharter
         : null,
       charterDraftMode: payload.charterDraftMode === true,
+      activeSources: Array.isArray(payload.activeSources) ? payload.activeSources : [],
     };
     runSenders.set(runId, sender);
     const timer = setTimeout(() => {

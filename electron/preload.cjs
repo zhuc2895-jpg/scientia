@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('scienceAgent', {
     return ipcRenderer.invoke('files:authorize-dropped', { paths });
   },
   importFiles: (tokens) => ipcRenderer.invoke('files:import', { tokens }),
+  sourceImportFiles: () => ipcRenderer.invoke('sources:pick-import'),
+  sourceImportReference: (payload) => ipcRenderer.invoke('sources:import-reference', payload),
+  sourceSetActive: (payload) => ipcRenderer.invoke('sources:set-active', payload),
   runAgent: (payload) => ipcRenderer.invoke('agent:run', payload),
   cancelAgent: (runId) => ipcRenderer.invoke('agent:cancel', runId),
   recoverRun: (payload) => ipcRenderer.invoke('research:recover-run', payload),

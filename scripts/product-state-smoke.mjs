@@ -383,6 +383,24 @@ try {
   assert.match(importGuard.forged.message, /导入授权无效或已过期/);
   console.log('OK   File imports require main-process authorization tokens');
 
+  const sourceImport = await evaluate(cdp, `window.scienceAgent.sourceImportReference({
+    reference: 'https://doi.org/10.1000/SMOKE',
+    title: 'Smoke source record',
+    year: 2026,
+  })`);
+  assert.equal(sourceImport.imported.length, 1);
+  assert.equal(sourceImport.duplicates.length, 0);
+  const smokeSource = sourceImport.imported[0];
+  assert.equal(smokeSource.doi, '10.1000/smoke');
+  assert.equal(smokeSource.localLocator.startsWith('.science/sources/'), true);
+  assert.equal(existsSync(path.join(workspace, smokeSource.localLocator)), true);
+  const activeSourceState = await evaluate(cdp, `window.scienceAgent.sourceSetActive({
+    conversationId: ${JSON.stringify(expectedId)},
+    sourceIds: [${JSON.stringify(smokeSource.id)}],
+  })`);
+  assert.deepEqual(activeSourceState.conversations.find((conversation) => conversation.id === expectedId).activeSourceIds, [smokeSource.id]);
+  console.log('OK   DOI registration creates a durable Project Source Record and Active Source Set');
+
   const initialProjectId = created.activeProjectId;
   const existingProjectIds = created.projects.map((project) => project.id);
   const existingProjectCount = created.projects.length;
@@ -426,6 +444,20 @@ try {
   }).then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message }))`);
   assert.equal(crossProjectRun.ok, false);
   assert.match(crossProjectRun.message, /当前 Research Project/);
+  const crossProjectSources = await evaluate(cdp, `(async () => ({
+    foreignConversation: await window.scienceAgent.sourceSetActive({
+      conversationId: ${JSON.stringify(expectedId)},
+      sourceIds: [${JSON.stringify(smokeSource.id)}],
+    }).then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message })),
+    foreignSource: await window.scienceAgent.sourceSetActive({
+      conversationId: ${JSON.stringify(managedConversationState.activeId)},
+      sourceIds: [${JSON.stringify(smokeSource.id)}],
+    }).then(() => ({ ok: true, message: '' }), (error) => ({ ok: false, message: error.message })),
+  }))()`);
+  assert.equal(crossProjectSources.foreignConversation.ok, false);
+  assert.match(crossProjectSources.foreignConversation.message, /当前 Research Project/);
+  assert.equal(crossProjectSources.foreignSource.ok, false);
+  assert.match(crossProjectSources.foreignSource.message, /不属于当前 Research Project/);
   console.log('OK   A Research Project cannot inspect or run another Research Workspace');
 
   await evaluate(cdp, `document.querySelector('[data-project-id="${initialProjectId}"]').click()`);
@@ -436,6 +468,8 @@ try {
   assert.equal(switchedState.activeProjectId, initialProjectId);
   assert.equal(switchedState.activeId, expectedId);
   assert.equal(switchedState.conversations.length, 1);
+  assert.equal(switchedState.sources.some((source) => source.id === smokeSource.id), true);
+  assert.deepEqual(switchedState.conversations.find((conversation) => conversation.id === expectedId).activeSourceIds, [smokeSource.id]);
   assert.equal(switchedState.project.stageGraph.currentStageKey, 'inquiry');
   const activeWorkspace = await pollUntil(
     async () => (await evaluate(cdp, 'window.scienceAgent.configLoad()')).workspace,

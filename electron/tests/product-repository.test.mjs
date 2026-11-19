@@ -896,3 +896,133 @@ test('approved Research Charter revisions survive repository restart for later r
   assert.equal(project.charter.approved.dataPolicy, 'sensitive');
   assert.equal(project.charter.approved.citationStyle, 'APA 7');
 });
+
+function sourceRecord(overrides = {}) {
+  return {
+    id: 'source-1',
+    kind: 'markdown',
+    title: 'A Reproducible Trial',
+    authors: ['Jane Smith'],
+    year: 2023,
+    doi: '10.1000/trial',
+    url: null,
+    venue: 'Journal of Reproducibility',
+    stableIdentifier: 'doi:10.1000/trial',
+    localLocator: '.science/sources/trial.md',
+    contentHash: 'a'.repeat(64),
+    acquiredAt: '2026-11-19T12:00:00.000Z',
+    metadata: { importedBy: 'test' },
+    ...overrides,
+  };
+}
+
+test('project source library persists records and suppresses stable-identifier duplicates', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const first = repository.registerSources({ sources: [sourceRecord()] });
+  assert.equal(first.inserted.length, 1);
+  assert.equal(first.duplicates.length, 0);
+
+  const duplicate = repository.registerSources({
+    sources: [sourceRecord({
+      id: 'source-duplicate',
+      title: 'Trial with a revised title',
+      localLocator: '.science/sources/duplicate.md',
+      contentHash: 'b'.repeat(64),
+    })],
+  });
+  assert.equal(duplicate.inserted.length, 0);
+  assert.equal(duplicate.duplicates.length, 1);
+  assert.equal(duplicate.duplicates[0].existing.id, 'source-1');
+
+  const state = repository.loadState();
+  assert.equal(state.sources.length, 1);
+  assert.equal(state.sources[0].title, 'A Reproducible Trial');
+  assert.equal(state.sources[0].contentHash, 'a'.repeat(64));
+});
+
+test('normalized title and year detect duplicates when no stable identifier exists', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({
+    sources: [sourceRecord({ stableIdentifier: 'file:first.md', doi: null })],
+  });
+  const result = repository.registerSources({
+    sources: [sourceRecord({
+      id: 'source-title-duplicate',
+      title: '  A reproducible   trial ',
+      stableIdentifier: 'file:second.md',
+      doi: null,
+      localLocator: '.science/sources/second.md',
+      contentHash: 'c'.repeat(64),
+    })],
+  });
+
+  assert.equal(result.inserted.length, 0);
+  assert.equal(result.duplicates[0].existing.id, 'source-1');
+  assert.equal(repository.loadState().sources.length, 1);
+});
+
+test('conversation active source sets persist and reject sources from another project', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const projectAConversation = conversation({ id: 'conversation-a' });
+  repository.createConversation(projectAConversation);
+  repository.registerSources({ sources: [sourceRecord()] });
+  repository.setActiveSources({
+    conversationId: projectAConversation.id,
+    sourceIds: ['source-1'],
+  });
+
+  assert.deepEqual(repository.getConversationActiveSourceIds(projectAConversation.id), ['source-1']);
+  assert.deepEqual(
+    repository.getConversationActiveSources(projectAConversation.id).map((source) => source.id),
+    ['source-1'],
+  );
+
+  repository.createProject({
+    id: 'project-b',
+    name: 'Second Project',
+    workspacePath: 'C:/Research/Second Project',
+    workspaceKind: 'imported',
+  });
+  const projectBConversation = conversation({ id: 'conversation-b', title: 'Second project conversation' });
+  repository.createConversation(projectBConversation);
+  repository.registerSources({
+    sources: [sourceRecord({
+      id: 'source-b',
+      title: 'Second project source',
+      doi: '10.1000/second',
+      stableIdentifier: 'doi:10.1000/second',
+      localLocator: '.science/sources/second.md',
+      contentHash: 'd'.repeat(64),
+    })],
+  });
+
+  assert.throws(() => repository.setActiveSources({
+    conversationId: projectAConversation.id,
+    sourceIds: ['source-b'],
+  }), /当前 Research Project/);
+  assert.throws(() => repository.setActiveSources({
+    conversationId: projectBConversation.id,
+    sourceIds: ['source-1'],
+  }), /不属于当前 Research Project/);
+  assert.throws(() => repository.getConversationActiveSources(projectAConversation.id), /当前 Research Project/);
+  assert.equal(repository.getSource('source-1'), null);
+  assert.equal(repository.getSource('source-b')?.id, 'source-b');
+});

@@ -21,6 +21,7 @@ import { createConfigStore } from './config-store.js';
 import { createResearchProjectLifecycle } from './research-project-lifecycle.js';
 import { researchCharterContentString, researchCharterFieldsEqual } from '../app/research-charter.js';
 import { evaluateResearchRunPolicy } from '../app/research-run-policy.js';
+import { ingestReference, ingestSourceFiles } from './source-ingestion.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -388,6 +389,58 @@ async function importFiles(workspaceInput, tokens) {
   return imported;
 }
 
+async function cleanupUnregisteredSourceFiles(workspacePath, duplicates, inserted) {
+  const retained = new Set(inserted.map((source) => source.localLocator.split('#')[0]));
+  const candidates = new Set(duplicates
+    .map((duplicate) => duplicate.incoming?.localLocator?.split('#')[0])
+    .filter((locator) => typeof locator === 'string' && locator.startsWith('.science/sources/') && !retained.has(locator)));
+  for (const locator of candidates) {
+    const absolute = path.resolve(workspacePath, locator);
+    if (!isWithin(path.resolve(workspacePath), absolute)) continue;
+    await fs.rm(absolute, { force: true });
+  }
+}
+
+async function registerImportedSources(workspacePath, sources) {
+  const result = productRepository.registerSources({ sources });
+  await cleanupUnregisteredSourceFiles(workspacePath, result.duplicates, result.inserted);
+  return {
+    productState: productRepository.loadState(),
+    imported: result.inserted,
+    duplicates: result.duplicates.map((duplicate) => ({
+      title: duplicate.incoming.title,
+      existingTitle: duplicate.existing.title,
+    })),
+  };
+}
+
+async function pickAndImportSourceFiles() {
+  const workspace = currentProjectWorkspace();
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '导入 Project Source Library',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Research Sources', extensions: ['pdf', 'md', 'markdown', 'tex', 'latex', 'bib', 'ris'] },
+      { name: 'PDF', extensions: ['pdf'] },
+      { name: 'Bibliographies', extensions: ['bib', 'ris'] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return { productState: productRepository.loadState(), imported: [], duplicates: [] };
+  const sources = await ingestSourceFiles({ workspacePath: workspace, filePaths: result.filePaths });
+  return registerImportedSources(workspace, sources);
+}
+
+async function importSourceReference(payload = {}) {
+  const workspace = currentProjectWorkspace();
+  const source = await ingestReference({
+    workspacePath: workspace,
+    reference: payload.reference,
+    title: payload.title,
+    year: payload.year,
+  });
+  return registerImportedSources(workspace, [source]);
+}
+
 async function findVerifiedCharterDraftArtifact({ runId, projectId }) {
   if (typeof runId !== 'string' || !runId || typeof projectId !== 'string' || !projectId) return false;
   // ponytail: bounded run-directory scan; index Charter drafts by run ID if run volume grows.
@@ -502,12 +555,14 @@ async function runAgent(payload, sender) {
     }
   }
   const approvedCharter = policyDecision.approvedCharter || null;
+  const activeSources = productRepository.getConversationActiveSources(payload?.conversationId);
   const enrichedPayload = {
     ...payload,
     projectId: state.activeProjectId,
     stageKey,
     researchCharter: approvedCharter,
     charterDraftMode: stageKey === 'scoping' && !approvedCharter,
+    activeSources,
   };
   return runtimeManager.run(enrichedPayload, sender, researchWorkspace);
 }
@@ -727,6 +782,9 @@ function installIpc() {
   });
   ipcMain.handle('files:authorize-dropped', async (_event, { paths }) => importAuthorizer.authorize(paths));
   ipcMain.handle('files:import', async (_event, { tokens }) => importFiles(currentProjectWorkspace(), tokens));
+  ipcMain.handle('sources:pick-import', async () => pickAndImportSourceFiles());
+  ipcMain.handle('sources:import-reference', async (_event, payload) => importSourceReference(payload));
+  ipcMain.handle('sources:set-active', async (_event, payload) => productRepository.setActiveSources(payload));
   ipcMain.handle('agent:run', async (event, payload) => runAgent(payload, event.sender));
   ipcMain.handle('agent:cancel', async (_event, runId) => cancelAgent(runId));
   ipcMain.handle('research:recover-run', async (_event, payload) => {

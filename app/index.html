@@ -262,6 +262,19 @@
         <div class="research-status" id="research-status">首次 Research Run 完成后，这里会显示证据与交付物核验结果。</div>
       </section>
 
+      <section class="inspector-section source-library-section">
+        <div class="section-heading">
+          <h3>Source Library</h3>
+          <span id="source-count">0 sources</span>
+        </div>
+        <div class="source-library-actions">
+          <button class="mini-button" id="import-source-files" type="button">导入文件</button>
+          <button class="mini-button" id="add-source-reference" type="button">DOI / URL</button>
+        </div>
+        <div class="active-source-summary" id="active-source-summary">先选择一个 Conversation 设置 Active Source Set。</div>
+        <div class="source-list" id="source-list"></div>
+      </section>
+
       <section class="inspector-section">
         <div class="section-heading"><h3>最近文件</h3><span id="file-count">0 files</span></div>
         <div class="file-list" id="recent-files"></div>
@@ -438,6 +451,35 @@
           <button type="button" class="secondary-button" id="cancel-charter">取消</button>
           <button type="button" class="secondary-button" id="save-charter-draft">保存草稿</button>
           <button type="button" class="primary-button" id="approve-charter">批准并进入 Evidence</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="settings-dialog source-reference-dialog" id="source-reference-dialog">
+    <form id="source-reference-form">
+      <div class="dialog-header">
+        <div>
+          <div class="dialog-kicker">Project Source Library // reference</div>
+          <h2>添加 DOI 或 URL</h2>
+          <p>先登记到 Project Source Library，再将其加入 Conversation 的 Active Source Set。</p>
+        </div>
+        <button class="icon-button subtle" type="button" id="cancel-source-reference-icon" aria-label="关闭来源登记"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <div class="dialog-body">
+        <label class="field-label" for="source-reference">DOI 或 URL</label>
+        <input id="source-reference" type="text" maxlength="2000" required placeholder="10.1000/example 或 https://example.org/paper">
+        <label class="field-label" for="source-title">标题（可选）</label>
+        <input id="source-title" type="text" maxlength="500" placeholder="用于重复检测与检索的规范标题">
+        <label class="field-label" for="source-year">年份（可选）</label>
+        <input id="source-year" type="number" min="1000" max="2999" step="1" placeholder="2026">
+        <p class="source-dialog-note">系统会生成 Research Workspace 内的本地登记文件，并记录获取时间与 SHA-256。跨 Project 的 Source Record 不会被读取。</p>
+      </div>
+      <div class="dialog-footer">
+        <span class="dialog-footnote">只有登记成功的 Source Record 才能加入 Active Source Set。</span>
+        <div class="dialog-footer-actions">
+          <button type="button" class="secondary-button" id="cancel-source-reference">取消</button>
+          <button type="submit" class="primary-button" id="register-source-reference">登记来源</button>
         </div>
       </div>
     </form>

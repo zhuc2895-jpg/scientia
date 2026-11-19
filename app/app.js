@@ -44,6 +44,7 @@ const state = {
   projects: [],
   activeProjectId: null,
   project: null,
+  sources: [],
   conversations: [],
   activeId: null,
   pendingProjectImport: null,
@@ -119,6 +120,14 @@ const els = {
   metricEvidence: $('#metric-evidence'),
   researchStatus: $('#research-status'),
   researchMode: $('#research-mode'),
+  sourceCount: $('#source-count'),
+  sourceList: $('#source-list'),
+  activeSourceSummary: $('#active-source-summary'),
+  sourceReferenceDialog: $('#source-reference-dialog'),
+  sourceReferenceForm: $('#source-reference-form'),
+  sourceReference: $('#source-reference'),
+  sourceTitle: $('#source-title'),
+  sourceYear: $('#source-year'),
   recentFiles: $('#recent-files'),
   fileCount: $('#file-count'),
   timeline: $('#timeline'),
@@ -253,6 +262,7 @@ function applyProductState(productState) {
   state.projects = Array.isArray(productState?.projects) ? productState.projects : [];
   state.activeProjectId = productState?.activeProjectId || productState?.project?.id || null;
   state.project = productState?.project || null;
+  state.sources = Array.isArray(productState?.sources) ? productState.sources : [];
   state.conversations = Array.isArray(productState?.conversations) ? productState.conversations : [];
   state.activeId = productState?.activeId || null;
   state.requiresResearchWorkspaceBinding = Boolean(productState?.requiresResearchWorkspaceBinding);
@@ -1012,6 +1022,56 @@ function finishActivities() {
   renderTimeline();
 }
 
+function sourceIdentifierLabel(source) {
+  if (source.doi) return `DOI ${source.doi}`;
+  if (source.url) return source.url;
+  return source.stableIdentifier || source.localLocator;
+}
+
+function sourceKindLabel(kind) {
+  return ({
+    pdf: 'PDF',
+    markdown: 'Markdown',
+    tex: 'TeX',
+    bibtex: 'BibTeX',
+    ris: 'RIS',
+    doi: 'DOI',
+    url: 'URL',
+  })[kind] || kind;
+}
+
+function renderSourceLibrary() {
+  if (!els.sourceList) return;
+  const sources = state.sources;
+  const conversation = activeConversation();
+  const activeIds = new Set(Array.isArray(conversation?.activeSourceIds) ? conversation.activeSourceIds : []);
+  els.sourceCount.textContent = `${sources.length} sources`;
+  els.activeSourceSummary.textContent = conversation
+    ? `当前 Conversation 已激活 ${activeIds.size} / ${sources.length} 个来源。`
+    : '先选择一个 Conversation 设置 Active Source Set。';
+  if (!sources.length) {
+    els.sourceList.innerHTML = '<div class="source-empty">Project Source Library 为空。先导入 PDF、Markdown、TeX、BibTeX、RIS，或登记 DOI / URL。</div>';
+    return;
+  }
+  els.sourceList.innerHTML = sources.map((source) => {
+    const active = activeIds.has(source.id);
+    const year = source.year ? ` · ${source.year}` : '';
+    const authors = Array.isArray(source.authors) && source.authors.length ? `${source.authors.slice(0, 2).join(', ')} · ` : '';
+    return `
+      <div class="source-row${active ? ' active' : ''}">
+        <label class="source-select" title="加入或移出当前 Conversation 的 Active Source Set">
+          <input type="checkbox" data-source-id="${escapeHTML(source.id)}" ${active ? 'checked' : ''} ${conversation ? '' : 'disabled'}>
+          <span></span>
+        </label>
+        <button type="button" class="source-copy" data-open-source="${escapeHTML(source.localLocator.split('#')[0])}" title="打开本地来源">
+          <span class="source-title">${escapeHTML(source.title)}</span>
+          <span class="source-meta">${escapeHTML(sourceKindLabel(source.kind))}${escapeHTML(year)} · ${escapeHTML(authors)}${escapeHTML(sourceIdentifierLabel(source))}</span>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
 function renderWorkspace() {
   const workspace = state.workspace;
   const pathValue = state.config?.workspace || '';
@@ -1120,6 +1180,7 @@ function renderAll() {
   renderMessages();
   renderTimeline();
   renderWorkspace();
+  renderSourceLibrary();
   renderPendingAttachments();
   applyRuntimeState();
 }
@@ -1663,6 +1724,87 @@ async function importAuthorizedFiles(tokens) {
   }
 }
 
+function applySourceImportResult(result) {
+  applyProductState(result.productState);
+  renderAll();
+  void refreshWorkspace();
+  const importedCount = Array.isArray(result.imported) ? result.imported.length : 0;
+  const duplicateCount = Array.isArray(result.duplicates) ? result.duplicates.length : 0;
+  if (importedCount && duplicateCount) showToast(`登记 ${importedCount} 个来源；跳过 ${duplicateCount} 个重复来源。`, 4200);
+  else if (importedCount) showToast(`已登记 ${importedCount} 个来源到 Project Source Library。`);
+  else if (duplicateCount) showToast(`未新增来源：${duplicateCount} 个条目已在 Source Library 中。`, 4200);
+  else showToast('没有可登记的来源。');
+}
+
+async function importProjectSources() {
+  if (!state.config?.workspace) {
+    openSettings();
+    return;
+  }
+  try {
+    applySourceImportResult(await bridge.sourceImportFiles());
+  } catch (error) {
+    showToast(error.message || '无法登记来源文件。', 5000);
+  }
+}
+
+function openSourceReferenceDialog() {
+  if (!state.config?.workspace) {
+    openSettings();
+    return;
+  }
+  els.sourceReferenceForm.reset();
+  if (!els.sourceReferenceDialog.open) els.sourceReferenceDialog.showModal();
+  setTimeout(() => els.sourceReference.focus(), 0);
+}
+
+function closeSourceReferenceDialog() {
+  if (els.sourceReferenceDialog.open) els.sourceReferenceDialog.close();
+}
+
+async function submitSourceReference(event) {
+  event.preventDefault();
+  const reference = els.sourceReference.value.trim();
+  if (!reference) {
+    els.sourceReference.focus();
+    return;
+  }
+  try {
+    const result = await bridge.sourceImportReference({
+      reference,
+      title: els.sourceTitle.value.trim(),
+      year: els.sourceYear.value ? Number(els.sourceYear.value) : null,
+    });
+    closeSourceReferenceDialog();
+    applySourceImportResult(result);
+  } catch (error) {
+    showToast(error.message || '无法登记 DOI / URL。', 5000);
+  }
+}
+
+async function setConversationSourceActive(sourceId, active) {
+  const conversation = activeConversation();
+  if (!conversation) {
+    renderSourceLibrary();
+    showToast('请先选择或创建一个 Conversation。');
+    return;
+  }
+  const current = new Set(Array.isArray(conversation.activeSourceIds) ? conversation.activeSourceIds : []);
+  if (active) current.add(sourceId);
+  else current.delete(sourceId);
+  try {
+    const productState = await bridge.sourceSetActive({
+      conversationId: conversation.id,
+      sourceIds: [...current],
+    });
+    applyProductState(productState);
+    renderAll();
+  } catch (error) {
+    renderSourceLibrary();
+    showToast(error.message || '无法更新 Active Source Set。', 5000);
+  }
+}
+
 function settingsStatusMarkup() {
   const config = state.config;
   if (!config) return '<span class="status-dot"></span><span>正在读取配置…</span>';
@@ -1968,6 +2110,19 @@ function bindEvents() {
     els.evidenceToggle.setAttribute('aria-pressed', String(state.evidenceMode));
   });
   $('#attach-files').addEventListener('click', () => void attachResearchFiles());
+  $('#import-source-files').addEventListener('click', () => void importProjectSources());
+  $('#add-source-reference').addEventListener('click', openSourceReferenceDialog);
+  $('#cancel-source-reference').addEventListener('click', closeSourceReferenceDialog);
+  $('#cancel-source-reference-icon').addEventListener('click', closeSourceReferenceDialog);
+  els.sourceReferenceForm.addEventListener('submit', submitSourceReference);
+  els.sourceList.addEventListener('change', (event) => {
+    const checkbox = event.target.closest('[data-source-id]');
+    if (checkbox) void setConversationSourceActive(checkbox.dataset.sourceId, checkbox.checked);
+  });
+  els.sourceList.addEventListener('click', (event) => {
+    const sourceButton = event.target.closest('[data-open-source]');
+    if (sourceButton) void bridge.openPath(sourceButton.dataset.openSource);
+  });
 
   els.attachmentTray.addEventListener('click', (event) => {
     const remove = event.target.closest('[data-remove-attachment]');
@@ -2150,6 +2305,20 @@ function createPreviewBridge() {
     archivedAt: null,
   }];
   let previewActiveProjectId = previewProjects[0].id;
+  let previewSources = [
+    {
+      id: 'preview-source-1', projectId: previewActiveProjectId, kind: 'pdf', title: 'Reproducibility in computational science',
+      authors: ['A. Researcher', 'B. Scientist'], year: 2025, doi: '10.1000/reproducibility', url: null, venue: 'Research Methods',
+      stableIdentifier: 'doi:10.1000/reproducibility', localLocator: '.science/sources/reproducibility.pdf',
+      contentHash: '1'.repeat(64), acquiredAt: new Date().toISOString(), metadata: {},
+    },
+    {
+      id: 'preview-source-2', projectId: previewActiveProjectId, kind: 'bibtex', title: 'Evidence-first research workflows',
+      authors: ['C. Author'], year: 2024, doi: '10.1000/evidence-first', url: null, venue: 'Open Research',
+      stableIdentifier: 'doi:10.1000/evidence-first', localLocator: '.science/sources/workflows.bib#entry-1',
+      contentHash: '2'.repeat(64), acquiredAt: new Date().toISOString(), metadata: {},
+    },
+  ];
   const previewStageStates = new Map([[previewActiveProjectId, createInitialResearchStageState()]]);
   const previewCharterStates = new Map([[previewActiveProjectId, createInitialResearchCharterState()]]);
   const previewConversationsByProject = new Map([[previewActiveProjectId, []]]);
@@ -2181,6 +2350,7 @@ function createPreviewBridge() {
     projects: previewProjects.map(previewSerializeProject),
     activeProjectId: previewActiveProjectId,
     project: previewSerializeProject(previewProject()),
+    sources: previewSources.filter((source) => source.projectId === previewActiveProjectId).map((source) => structuredClone(source)),
     conversations: (previewConversationsByProject.get(previewActiveProjectId) || []).map((conversation) => structuredClone(conversation)),
     activeId: previewActiveConversationByProject.get(previewActiveProjectId) || null,
     migrationComplete: previewMigrationComplete,
@@ -2392,6 +2562,35 @@ function createPreviewBridge() {
     async authorizeDroppedFiles() { return []; },
     async importFiles(tokens) {
       return tokens.map((_token, index) => ({ name: `file-${index + 1}`, relativePath: `.science/inputs/demo/${index + 1}-file`, size: 1024 }));
+    },
+    async sourceImportFiles() {
+      return { productState: previewProductState(), imported: [], duplicates: [] };
+    },
+    async sourceImportReference({ reference, title, year }) {
+      const source = {
+        id: `preview-source-${previewSources.length + 1}`,
+        projectId: previewActiveProjectId,
+        kind: /^10\./i.test(reference) ? 'doi' : 'url',
+        title: title || reference,
+        authors: [],
+        year: year || null,
+        doi: /^10\./i.test(reference) ? reference : null,
+        url: /^10\./i.test(reference) ? null : reference,
+        venue: '',
+        stableIdentifier: `${/^10\./i.test(reference) ? 'doi' : 'url'}:${reference}`,
+        localLocator: `.science/sources/preview-source-${previewSources.length + 1}.json`,
+        contentHash: '3'.repeat(64),
+        acquiredAt: new Date().toISOString(),
+        metadata: {},
+      };
+      previewSources.push(source);
+      return { productState: previewProductState(), imported: [source], duplicates: [] };
+    },
+    async sourceSetActive({ conversationId, sourceIds }) {
+      const conversations = previewConversationsByProject.get(previewActiveProjectId) || [];
+      const conversation = conversations.find((item) => item.id === conversationId);
+      if (conversation) conversation.activeSourceIds = [...sourceIds];
+      return previewProductState();
     },
     async runAgent(payload) {
       const charterState = normalizeResearchCharterState(

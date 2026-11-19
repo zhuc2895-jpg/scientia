@@ -23,6 +23,14 @@ import {
   reopenResearchStage,
 } from '../app/research-stages.js';
 import { isWithin } from './path-boundary.js';
+import {
+  findDuplicateSource,
+  normalizeDoi,
+  normalizeSourceTitle,
+  normalizeSourceUrl,
+  normalizeSourceYear,
+  stableIdentifierForSource,
+} from '../app/source-library.js';
 
 const ACTIVE_PROJECT_KEY = 'active_project_id';
 const ACTIVE_CONVERSATION_KEY = 'active_conversation_id';
@@ -30,6 +38,86 @@ const CONVERSATION_MIGRATION_KEY = 'conversation_local_storage_v1';
 const DEFAULT_PROJECT_BOOTSTRAP_KEY = 'default_project_bootstrap_v1';
 const DEFAULT_PROJECT_ID = 'scientia-default-project';
 const WORKSPACE_KINDS = new Set(['managed', 'imported']);
+const SOURCE_KINDS = new Set(['pdf', 'markdown', 'tex', 'bibtex', 'ris', 'doi', 'url']);
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(value || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function deserializeSource(row) {
+  let authors = [];
+  try {
+    const parsed = JSON.parse(row.authors_json || '[]');
+    if (Array.isArray(parsed)) authors = parsed.filter((author) => typeof author === 'string');
+  } catch {
+    // Invalid author metadata remains recoverable through the source title and locator.
+  }
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    kind: row.kind,
+    title: row.title,
+    authors,
+    year: row.year ?? null,
+    doi: row.doi || null,
+    url: row.url || null,
+    venue: row.venue || '',
+    stableIdentifier: row.stable_identifier || null,
+    localLocator: row.local_locator,
+    contentHash: row.content_hash,
+    acquiredAt: row.acquired_at,
+    metadata: parseJsonObject(row.metadata_json),
+  };
+}
+
+function normalizeSourceRecord(value = {}) {
+  const id = typeof value.id === 'string' ? value.id.trim() : '';
+  if (!id || id.length > 200 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) throw new Error('Source ID 无效。');
+  const kind = typeof value.kind === 'string' ? value.kind.trim().toLowerCase() : '';
+  if (!SOURCE_KINDS.has(kind)) throw new Error('Source 类型无效。');
+  const title = typeof value.title === 'string' ? value.title.replace(/\s+/g, ' ').trim() : '';
+  if (!title || title.length > 500) throw new Error('Source 标题无效。');
+  const authors = Array.isArray(value.authors)
+    ? [...new Set(value.authors.map((author) => String(author || '').trim()).filter(Boolean))].slice(0, 100)
+    : [];
+  const doi = normalizeDoi(value.doi);
+  const url = normalizeSourceUrl(value.url);
+  const stableIdentifier = stableIdentifierForSource({
+    stableIdentifier: value.stableIdentifier,
+    doi,
+    url,
+  });
+  const localLocator = typeof value.localLocator === 'string' ? value.localLocator.trim().replace(/\\/g, '/') : '';
+  if (!localLocator || path.isAbsolute(localLocator) || localLocator.startsWith('../') || localLocator.includes('/../')) {
+    throw new Error('Source local locator 必须是 Research Workspace 内的相对路径。');
+  }
+  const contentHash = typeof value.contentHash === 'string' ? value.contentHash.trim().toLowerCase() : '';
+  if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Source content hash 无效。');
+  const acquiredAt = typeof value.acquiredAt === 'string' && !Number.isNaN(Date.parse(value.acquiredAt))
+    ? new Date(value.acquiredAt).toISOString()
+    : new Date().toISOString();
+  return {
+    id,
+    kind,
+    title,
+    normalizedTitle: normalizeSourceTitle(title),
+    authors,
+    year: normalizeSourceYear(value.year),
+    doi,
+    url,
+    venue: typeof value.venue === 'string' ? value.venue.replace(/\s+/g, ' ').trim().slice(0, 500) : '',
+    stableIdentifier: stableIdentifier ? stableIdentifier.slice(0, 1000) : null,
+    localLocator: localLocator.slice(0, 2000),
+    contentHash,
+    acquiredAt,
+    metadata: value.metadata && typeof value.metadata === 'object' && !Array.isArray(value.metadata) ? value.metadata : {},
+  };
+}
 
 function deserializeConversation(row) {
   const parsed = JSON.parse(row.payload_json);
@@ -111,6 +199,31 @@ export function openProductRepository({ databasePath }) {
       created_at TEXT NOT NULL,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS sources (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      normalized_title TEXT NOT NULL,
+      authors_json TEXT NOT NULL DEFAULT '[]',
+      year INTEGER,
+      doi TEXT,
+      url TEXT,
+      venue TEXT NOT NULL DEFAULT '',
+      stable_identifier TEXT,
+      local_locator TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      acquired_at TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS sources_project_updated
+      ON sources(project_id, acquired_at DESC, id ASC);
+    CREATE UNIQUE INDEX IF NOT EXISTS sources_project_stable_identifier
+      ON sources(project_id, stable_identifier)
+      WHERE stable_identifier IS NOT NULL;
   `);
   const conversationColumns = database.prepare('PRAGMA table_info(conversations)').all();
   if (!conversationColumns.some((column) => column.name === 'project_id')) {
@@ -207,6 +320,23 @@ export function openProductRepository({ databasePath }) {
     SELECT id, project_id, type, decision, rationale, metadata_json, created_at
     FROM checkpoints WHERE project_id = ? ORDER BY created_at DESC, id DESC
   `);
+  const insertSource = database.prepare(`
+    INSERT INTO sources (
+      id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
+      stable_identifier, local_locator, content_hash, acquired_at, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const selectSources = database.prepare(`
+    SELECT id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
+           stable_identifier, local_locator, content_hash, acquired_at, metadata_json
+    FROM sources WHERE project_id = ? ORDER BY acquired_at DESC, title ASC, id ASC
+  `);
+  const selectSourceForProject = database.prepare(`
+    SELECT id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
+           stable_identifier, local_locator, content_hash, acquired_at, metadata_json
+    FROM sources WHERE id = ? AND project_id = ?
+  `);
+  const selectSourceById = database.prepare('SELECT id, project_id FROM sources WHERE id = ?');
 
   let closed = false;
 
@@ -361,6 +491,7 @@ export function openProductRepository({ databasePath }) {
       projects,
       activeProjectId,
       project: activeRow ? serializeProject(activeRow) : null,
+      sources: activeRow ? selectSources.all(activeRow.id).map(deserializeSource) : [],
       conversations,
       activeId,
       migrationComplete,
@@ -767,6 +898,116 @@ export function openProductRepository({ databasePath }) {
     return id;
   }
 
+  function assertConversationInActiveProject(conversationId) {
+    const project = assertActiveProject();
+    const conversationRow = selectConversationById.get(conversationId);
+    if (!conversationRow) throw new Error('无法读取不存在的 Conversation。');
+    if (conversationRow.project_id !== project.id) {
+      throw new Error('只能访问当前 Research Project 中的 Conversation。');
+    }
+    return { project, conversationRow };
+  }
+
+  function registerSources({ sources } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    if (!Array.isArray(sources)) throw new Error('Source Library 导入批次无效。');
+    if (sources.length > 200) throw new Error('单次最多登记 200 个 Source Record。');
+    const existing = selectSources.all(project.id).map(deserializeSource);
+    const inserted = [];
+    const duplicates = [];
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const value of sources) {
+        const source = normalizeSourceRecord(value);
+        const duplicate = findDuplicateSource(source, existing);
+        if (duplicate) {
+          duplicates.push({ incoming: source, existing: duplicate });
+          continue;
+        }
+        const createdAt = new Date().toISOString();
+        insertSource.run(
+          source.id,
+          project.id,
+          source.kind,
+          source.title,
+          source.normalizedTitle,
+          JSON.stringify(source.authors),
+          source.year,
+          source.doi,
+          source.url,
+          source.venue,
+          source.stableIdentifier,
+          source.localLocator,
+          source.contentHash,
+          source.acquiredAt,
+          JSON.stringify(source.metadata),
+          createdAt,
+        );
+        const stored = deserializeSource(selectSourceForProject.get(source.id, project.id));
+        inserted.push(stored);
+        existing.push(stored);
+      }
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
+    }
+    return { inserted, duplicates };
+  }
+
+  function getSource(id) {
+    assertOpen();
+    const project = assertActiveProject();
+    const row = selectSourceForProject.get(id, project.id);
+    return row ? deserializeSource(row) : null;
+  }
+
+  function getConversationActiveSourceIds(conversationId) {
+    assertOpen();
+    const { project, conversationRow } = assertConversationInActiveProject(conversationId);
+    const conversationState = deserializeConversation(conversationRow);
+    const requested = Array.isArray(conversationState.activeSourceIds) ? conversationState.activeSourceIds : [];
+    return [...new Set(requested.filter((id) => typeof id === 'string' && selectSourceForProject.get(id, project.id)))];
+  }
+
+  function getConversationActiveSources(conversationId) {
+    assertOpen();
+    const { project } = assertConversationInActiveProject(conversationId);
+    return getConversationActiveSourceIds(conversationId)
+      .map((id) => selectSourceForProject.get(id, project.id))
+      .filter(Boolean)
+      .map(deserializeSource);
+  }
+
+  function setActiveSources({ conversationId, sourceIds } = {}) {
+    assertOpen();
+    const { project, conversationRow } = assertConversationInActiveProject(conversationId);
+    if (!Array.isArray(sourceIds)) throw new Error('Active Source Set 格式无效。');
+    const uniqueIds = [...new Set(sourceIds.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))];
+    if (uniqueIds.length > 500) throw new Error('Active Source Set 最多包含 500 个 Source Record。');
+    for (const sourceId of uniqueIds) {
+      if (selectSourceForProject.get(sourceId, project.id)) continue;
+      if (selectSourceById.get(sourceId)) throw new Error('Source 不属于当前 Research Project。');
+      throw new Error('Source Record 不存在。');
+    }
+    const conversationState = deserializeConversation(conversationRow);
+    const updated = {
+      ...conversationState,
+      activeSourceIds: uniqueIds,
+      updatedAt: new Date().toISOString(),
+    };
+    updateConversation.run(
+      updated.title,
+      updated.createdAt,
+      updated.updatedAt,
+      JSON.stringify(updated),
+      conversationId,
+      project.id,
+    );
+    return loadState();
+  }
+
   function close() {
     if (closed) return;
     closed = true;
@@ -780,6 +1021,11 @@ export function openProductRepository({ databasePath }) {
     getBoundResearchWorkspacePaths,
     recordCheckpoint: recordCheckpointRecord,
     listCheckpoints: listCheckpointRecords,
+    registerSources,
+    getSource,
+    getConversationActiveSourceIds,
+    getConversationActiveSources,
+    setActiveSources,
     saveResearchCharterDraft: saveResearchCharterDraftRecord,
     restoreResearchCharterRevision: restoreResearchCharterRevisionRecord,
     approveResearchCharter: approveResearchCharterRecord,

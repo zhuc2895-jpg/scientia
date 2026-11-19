@@ -46,6 +46,10 @@ class BridgeSmokeTests(unittest.TestCase):
                         return False
 
                     def run(self, prompt, session_id=None, on_notification=None):
+                        if "Application-selected Active Source Set" not in prompt:
+                            raise RuntimeError("active source set missing from prompt")
+                        if ".science/sources/source.md" not in prompt:
+                            raise RuntimeError("registered source locator missing from prompt")
                         output_dir = next((self.cwd / ".science" / "outputs").iterdir())
                         (output_dir / "report.md").write_text("# Smoke report\\nSupported by [1].\\n", encoding="utf-8")
                         ledger_match = re.search(r"The evidence ledger is `([^`]+)`", prompt)
@@ -73,6 +77,12 @@ class BridgeSmokeTests(unittest.TestCase):
                 "evidenceMode": True,
                 "mode": "literature",
                 "stageKey": "evidence",
+                "activeSources": [{
+                    "title": "Registered source",
+                    "year": 2026,
+                    "stableIdentifier": "doi:10.1000/smoke",
+                    "localLocator": ".science/sources/source.md",
+                }],
                 "researchCharter": {
                     "version": 2,
                     "status": "approved",
