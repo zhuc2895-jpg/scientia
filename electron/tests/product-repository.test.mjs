@@ -18,6 +18,26 @@ function openTestRepository(databasePath) {
   return repository;
 }
 
+function charter(overrides = {}) {
+  return {
+    question: 'How reproducible is the reported effect?',
+    contribution: 'Clarify the strength and limits of the available evidence.',
+    scope: 'Peer-reviewed studies available in the project workspace.',
+    methodConstraints: 'Preserve source locators and distinguish observations from inference.',
+    successCriteria: 'A traceable evidence record and a defensible research brief.',
+    paperType: 'Review',
+    citationStyle: 'Vancouver',
+    dataPolicy: 'standard',
+    ...overrides,
+  };
+}
+
+function approveTestCharter(repository, overrides = {}) {
+  const fields = charter(overrides);
+  repository.saveResearchCharterDraft({ charter: fields, source: 'user' });
+  return repository.approveResearchCharter({ charter: fields });
+}
+
 function conversation(overrides = {}) {
   return {
     id: 'conversation-1',
@@ -512,7 +532,7 @@ test('research stages persist completed and not-applicable state across restarts
   );
   assert.match(initial.stages[1].lockReason, /Scoping/);
 
-  repository.completeResearchStage('scoping');
+  approveTestCharter(repository);
   repository.markResearchStageNotApplicable({
     stageKey: 'evidence',
     reason: 'This manuscript uses only project-generated simulation data.',
@@ -544,7 +564,7 @@ test('research stage state is project-scoped and completed stages can be revisit
   });
 
   const initialProjectId = repository.loadState().activeProjectId;
-  repository.completeResearchStage('scoping');
+  approveTestCharter(repository);
   repository.completeResearchStage('evidence');
 
   const otherProject = repository.createProject({
@@ -580,7 +600,7 @@ test('research stage mutations reject invalid transitions and missing skip reaso
 
   assert.throws(() => repository.completeResearchStage('evidence'), /当前阶段/);
   assert.throws(() => repository.completeResearchStage('unknown'), /阶段/);
-  assert.throws(() => repository.markResearchStageNotApplicable({ stageKey: 'scoping', reason: '   ' }), /原因/);
+  assert.throws(() => repository.markResearchStageNotApplicable({ stageKey: 'scoping', reason: '   ' }), /Charter/);
   assert.throws(() => repository.reopenResearchStage('scoping'), /Evidence/);
 });
 
@@ -592,7 +612,8 @@ test('the complete stage graph reaches a durable terminal state', (t) => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  for (const key of ['scoping', 'evidence', 'inquiry', 'synthesis', 'manuscript', 'release']) {
+  approveTestCharter(repository);
+  for (const key of ['evidence', 'inquiry', 'synthesis', 'manuscript', 'release']) {
     repository.completeResearchStage(key);
   }
   assert.equal(repository.loadState().project.stageGraph.currentStageKey, null);
@@ -637,6 +658,7 @@ test('partial stage records recover to a coherent ordered graph', (t) => {
   const { directory, databasePath } = temporaryDatabase();
   const first = openTestRepository(databasePath);
   const projectId = first.loadState().activeProjectId;
+  approveTestCharter(first);
   first.close();
 
   const timestamp = '2026-11-18T10:00:00.000Z';
@@ -666,4 +688,94 @@ test('partial stage records recover to a coherent ordered graph', (t) => {
   assert.equal(graph.stages[4].status, 'pending');
   assert.equal(graph.stages[5].status, 'pending');
   assert.match(graph.stages[4].lockReason, /Evidence/);
+});
+
+test('Scoping cannot advance or be skipped without an approved Research Charter', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const initial = repository.loadState().project;
+  assert.equal(initial.charter.current, null);
+  assert.equal(initial.stageGraph.nextAction.type, 'charter');
+  assert.deepEqual(initial.stageGraph.nextAction.allowedActions, ['review-charter']);
+  assert.throws(() => repository.completeResearchStage('scoping'), /Charter/);
+  assert.throws(
+    () => repository.markResearchStageNotApplicable({ stageKey: 'scoping', reason: 'Not needed.' }),
+    /Charter/,
+  );
+
+  let state = repository.saveResearchCharterDraft({ charter: charter(), source: 'agent', generatedByRunId: 'run-scoping-1' });
+  assert.equal(state.project.charter.current.version, 1);
+  assert.equal(state.project.charter.current.status, 'draft');
+  assert.equal(state.project.charter.current.source, 'agent');
+  assert.equal(state.project.charter.current.generatedByRunId, 'run-scoping-1');
+  assert.throws(() => repository.completeResearchStage('scoping'), /Charter/);
+
+  state = repository.approveResearchCharter({ charter: charter() });
+  assert.equal(state.project.stageGraph.currentStageKey, 'evidence');
+  assert.equal(state.project.charter.current.status, 'approved');
+  assert.equal(state.project.charter.approved.version, 1);
+  assert.equal(state.project.stageGraph.stages[0].status, 'completed');
+  assert.equal(state.project.stageGraph.stages[0].charterVersion, 1);
+  assert.equal(state.project.charter.current.generatedByRunId, 'run-scoping-1');
+  assert.match(state.project.charter.current.contentHash, /^[a-f0-9]{64}$/);
+});
+
+test('editing an approved Research Charter creates a revision and requires re-approval', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  approveTestCharter(repository);
+  repository.completeResearchStage('evidence');
+  assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'inquiry');
+
+  const revised = charter({ question: 'Which protocol has the strongest reproducibility evidence?' });
+  let state = repository.saveResearchCharterDraft({ charter: revised, source: 'user' });
+
+  assert.equal(state.project.stageGraph.currentStageKey, 'scoping');
+  assert.equal(state.project.stageGraph.stages[1].status, 'completed');
+  assert.equal(state.project.charter.revisions.length, 2);
+  assert.equal(state.project.charter.revisions[0].status, 'approved');
+  assert.equal(state.project.charter.current.version, 2);
+  assert.equal(state.project.charter.current.status, 'draft');
+  assert.equal(state.project.charter.needsReapproval, true);
+  assert.equal(state.project.charter.approved, null);
+  assert.throws(() => repository.completeResearchStage('scoping'), /Charter/);
+
+  state = repository.approveResearchCharter({ charter: revised });
+  assert.equal(state.project.stageGraph.currentStageKey, 'inquiry');
+  assert.equal(state.project.stageGraph.stages[0].charterVersion, 2);
+  assert.equal(state.project.charter.current.version, 2);
+  assert.equal(state.project.charter.current.status, 'approved');
+  assert.equal(state.project.charter.revisions[0].version, 1);
+  assert.equal(state.project.charter.revisions[0].status, 'approved');
+});
+
+test('approved Research Charter revisions survive repository restart for later runs', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const fields = charter({ dataPolicy: 'sensitive', citationStyle: 'APA 7' });
+  repository.saveResearchCharterDraft({ charter: fields, source: 'agent' });
+  repository.approveResearchCharter({ charter: fields });
+  repository.close();
+
+  repository = openTestRepository(databasePath);
+  const project = repository.loadState().project;
+  assert.equal(project.stageGraph.currentStageKey, 'evidence');
+  assert.equal(project.charter.approved.version, 1);
+  assert.equal(project.charter.approved.dataPolicy, 'sensitive');
+  assert.equal(project.charter.approved.citationStyle, 'APA 7');
 });

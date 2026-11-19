@@ -1,8 +1,20 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { normalizeConversation } from '../app/conversation-state.js';
+import {
+  approveResearchCharter as approveCharterState,
+  charterNeedsReapproval,
+  createInitialResearchCharterState,
+  currentApprovedResearchCharter,
+  currentResearchCharter,
+  normalizeResearchCharterState,
+  researchCharterContentString,
+  saveResearchCharterDraft as saveCharterDraftState,
+  setCurrentResearchCharterContentHash,
+} from '../app/research-charter.js';
 import {
   buildResearchStageGraph,
   completeResearchStage,
@@ -43,6 +55,12 @@ function normalizeWorkspaceKind(value) {
   return value;
 }
 
+function researchCharterContentHash(revision) {
+  return createHash('sha256')
+    .update(researchCharterContentString(revision), 'utf8')
+    .digest('hex');
+}
+
 export function openProductRepository({ databasePath }) {
   if (typeof databasePath !== 'string' || !databasePath) {
     throw new Error('产品数据库路径无效。');
@@ -62,6 +80,7 @@ export function openProductRepository({ databasePath }) {
       workspace_kind TEXT NOT NULL DEFAULT 'imported',
       current_stage_key TEXT NOT NULL DEFAULT 'scoping',
       research_stage_states_json TEXT NOT NULL DEFAULT '{}',
+      research_charter_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       archived_at TEXT
@@ -98,6 +117,9 @@ export function openProductRepository({ databasePath }) {
   }
   if (!projectColumns.some((column) => column.name === 'research_stage_states_json')) {
     database.exec("ALTER TABLE projects ADD COLUMN research_stage_states_json TEXT NOT NULL DEFAULT '{}'");
+  }
+  if (!projectColumns.some((column) => column.name === 'research_charter_json')) {
+    database.exec("ALTER TABLE projects ADD COLUMN research_charter_json TEXT NOT NULL DEFAULT '{}'");
   }
   const bootstrapState = database.prepare('SELECT value FROM app_state WHERE key = ?').get(DEFAULT_PROJECT_BOOTSTRAP_KEY);
   if (!bootstrapState) {
@@ -136,12 +158,12 @@ export function openProductRepository({ databasePath }) {
   `);
   const selectProject = database.prepare(`
     SELECT id, name, workspace_path, workspace_kind, current_stage_key, research_stage_states_json,
-           created_at, updated_at, archived_at
+           research_charter_json, created_at, updated_at, archived_at
     FROM projects WHERE id = ?
   `);
   const selectProjects = database.prepare(`
     SELECT id, name, workspace_path, workspace_kind, current_stage_key, research_stage_states_json,
-           created_at, updated_at, archived_at
+           research_charter_json, created_at, updated_at, archived_at
     FROM projects
     ORDER BY (archived_at IS NOT NULL) ASC, updated_at DESC, id ASC
   `);
@@ -153,6 +175,11 @@ export function openProductRepository({ databasePath }) {
   const updateResearchStageState = database.prepare(`
     UPDATE projects
     SET current_stage_key = ?, research_stage_states_json = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  const updateResearchProjectState = database.prepare(`
+    UPDATE projects
+    SET research_charter_json = ?, current_stage_key = ?, research_stage_states_json = ?, updated_at = ?
     WHERE id = ?
   `);
   const deleteProject = database.prepare('DELETE FROM projects WHERE id = ?');
@@ -172,7 +199,15 @@ export function openProductRepository({ databasePath }) {
     return typeof row?.workspace_path === 'string' && row.workspace_path.trim() !== '';
   }
 
-  function researchStageStateForRow(row) {
+  function researchCharterStateForRow(row) {
+    try {
+      return normalizeResearchCharterState(JSON.parse(row?.research_charter_json || '{}'));
+    } catch {
+      return createInitialResearchCharterState();
+    }
+  }
+
+  function researchStageStateForRow(row, charterState = researchCharterStateForRow(row)) {
     let stages = {};
     try {
       const parsed = JSON.parse(row?.research_stage_states_json || '{}');
@@ -180,14 +215,22 @@ export function openProductRepository({ databasePath }) {
     } catch {
       // Corrupt derived stage records recover to the beginning of the project stage graph.
     }
-    return normalizeResearchStageState({
+    const normalized = normalizeResearchStageState({
       currentStageKey: row?.current_stage_key || null,
       stages,
     });
+    const approved = currentApprovedResearchCharter(charterState);
+    if (!approved && normalized.currentStageKey !== 'scoping') {
+      return { ...normalized, currentStageKey: 'scoping' };
+    }
+    return normalized;
   }
 
   function serializeProject(row) {
     if (!row) return null;
+    const charterState = researchCharterStateForRow(row);
+    const approved = currentApprovedResearchCharter(charterState);
+    const current = currentResearchCharter(charterState);
     return {
       id: row.id,
       name: row.name,
@@ -196,7 +239,18 @@ export function openProductRepository({ databasePath }) {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       archivedAt: row.archived_at || null,
-      stageGraph: buildResearchStageGraph(researchStageStateForRow(row)),
+      charter: {
+        currentVersion: charterState.currentVersion,
+        approvedVersion: charterState.approvedVersion,
+        needsReapproval: charterNeedsReapproval(charterState),
+        current,
+        approved,
+        revisions: charterState.revisions,
+      },
+      stageGraph: buildResearchStageGraph(researchStageStateForRow(row, charterState), {
+        charterApproved: Boolean(approved),
+        charterVersion: approved?.version || current?.version || null,
+      }),
     };
   }
 
@@ -403,7 +457,7 @@ export function openProductRepository({ databasePath }) {
   function mutateResearchStageState(transform) {
     assertOpen();
     const project = assertActiveProject();
-    const nextState = transform(researchStageStateForRow(project));
+    const nextState = transform(researchStageStateForRow(project), project);
     const timestamp = new Date().toISOString();
     updateResearchStageState.run(
       nextState.currentStageKey || '',
@@ -414,10 +468,78 @@ export function openProductRepository({ databasePath }) {
     return loadState();
   }
 
+  function saveResearchCharterDraftRecord({ charter, source = 'user', generatedByRunId = null } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    const previousCharter = researchCharterStateForRow(project);
+    const previousCurrent = currentResearchCharter(previousCharter);
+    const nextCharter = saveCharterDraftState(previousCharter, charter, {
+      source,
+      updatedAt: new Date().toISOString(),
+      generatedByRunId,
+    });
+    const nextCurrent = currentResearchCharter(nextCharter);
+    const revisionCreated = previousCurrent?.status === 'approved'
+      && nextCurrent?.version !== previousCurrent.version;
+    const currentStageState = researchStageStateForRow(project, previousCharter);
+    const stageState = revisionCreated
+      ? { ...currentStageState, currentStageKey: 'scoping' }
+      : currentStageState;
+    const timestamp = new Date().toISOString();
+    updateResearchProjectState.run(
+      JSON.stringify(nextCharter),
+      stageState.currentStageKey || '',
+      JSON.stringify(stageState.stages),
+      timestamp,
+      project.id,
+    );
+    return loadState();
+  }
+
+  function approveResearchCharterRecord({ charter } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    const previousCharter = researchCharterStateForRow(project);
+    const previousStageState = researchStageStateForRow(project, previousCharter);
+    const timestamp = new Date().toISOString();
+    const drafted = saveCharterDraftState(previousCharter, charter, {
+      source: 'user',
+      updatedAt: timestamp,
+    });
+    let approvedCharter = approveCharterState(drafted, { approvedAt: timestamp });
+    const approvedContent = currentApprovedResearchCharter(approvedCharter);
+    approvedCharter = setCurrentResearchCharterContentHash(
+      approvedCharter,
+      researchCharterContentHash(approvedContent),
+    );
+    if (previousStageState.currentStageKey !== 'scoping') {
+      throw new Error('Research Charter 只能在 Scoping Gate 中批准。');
+    }
+    const approvedCurrent = currentApprovedResearchCharter(approvedCharter);
+    const nextStageState = completeResearchStage(previousStageState, 'scoping', {
+      completedAt: timestamp,
+      charterApproved: true,
+      charterVersion: approvedCurrent?.version || null,
+    });
+    updateResearchProjectState.run(
+      JSON.stringify(approvedCharter),
+      nextStageState.currentStageKey || '',
+      JSON.stringify(nextStageState.stages),
+      timestamp,
+      project.id,
+    );
+    return loadState();
+  }
+
   function completeResearchStageRecord(stageKey) {
-    return mutateResearchStageState((state) => completeResearchStage(state, stageKey, {
-      completedAt: new Date().toISOString(),
-    }));
+    return mutateResearchStageState((state, project) => {
+      const approvedCharter = currentApprovedResearchCharter(researchCharterStateForRow(project));
+      return completeResearchStage(state, stageKey, {
+        completedAt: new Date().toISOString(),
+        charterApproved: Boolean(approvedCharter),
+        charterVersion: approvedCharter?.version || null,
+      });
+    });
   }
 
   function markResearchStageNotApplicableRecord({ stageKey, reason } = {}) {
@@ -559,6 +681,8 @@ export function openProductRepository({ databasePath }) {
     getProject,
     getActiveResearchWorkspacePath,
     getBoundResearchWorkspacePaths,
+    saveResearchCharterDraft: saveResearchCharterDraftRecord,
+    approveResearchCharter: approveResearchCharterRecord,
     completeResearchStage: completeResearchStageRecord,
     markResearchStageNotApplicable: markResearchStageNotApplicableRecord,
     reopenResearchStage: reopenResearchStageRecord,

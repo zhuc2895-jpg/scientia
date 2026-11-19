@@ -40,6 +40,7 @@ export const RESEARCH_STAGES = Object.freeze([
 const STAGE_KEYS = new Set(RESEARCH_STAGES.map((stage) => stage.key));
 const REOPENABLE_STAGE_KEYS = new Set(['evidence', 'inquiry', 'synthesis']);
 const TERMINAL_STATUSES = new Set(['completed', 'not-applicable']);
+const SCOPING_STAGE_KEY = 'scoping';
 const MAX_REASON_LENGTH = 500;
 
 function stageIndex(key) {
@@ -64,9 +65,14 @@ function normalizeReason(value) {
   return reason;
 }
 
-function normalizeTimestamp(value) {
+function normalizeStoredTimestamp(value) {
   if (typeof value !== 'string' || !value.trim()) return null;
   return value;
+}
+
+function normalizeVersion(value) {
+  const version = Number(value);
+  return Number.isInteger(version) && version > 0 ? version : null;
 }
 
 function createResearchStageRecord({
@@ -74,26 +80,29 @@ function createResearchStageRecord({
   updatedAt = null,
   completedAt = null,
   notApplicableReason = null,
+  charterVersion = null,
 }) {
-  const normalizedUpdatedAt = normalizeTimestamp(updatedAt);
+  const normalizedUpdatedAt = normalizeStoredTimestamp(updatedAt);
   return {
     status,
     updatedAt: normalizedUpdatedAt,
     completedAt: status === 'completed'
-      ? normalizeTimestamp(completedAt) || normalizedUpdatedAt
+      ? normalizeStoredTimestamp(completedAt) || normalizedUpdatedAt
       : null,
     notApplicableReason: status === 'not-applicable' ? notApplicableReason : null,
+    charterVersion: status === 'completed' ? normalizeVersion(charterVersion) : null,
   };
 }
 
 function normalizeRecord(record) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
-  const updatedAt = normalizeTimestamp(record.updatedAt);
+  const updatedAt = normalizeStoredTimestamp(record.updatedAt);
   if (record.status === 'completed') {
     return createResearchStageRecord({
       status: 'completed',
       updatedAt,
       completedAt: record.completedAt,
+      charterVersion: record.charterVersion,
     });
   }
   if (record.status === 'not-applicable' || record.status === 'not_applicable') {
@@ -170,19 +179,30 @@ function advanceAfterStage(state, completedIndex) {
   };
 }
 
-export function completeResearchStage(state, stageKey, { completedAt = new Date().toISOString() } = {}) {
+export function completeResearchStage(state, stageKey, {
+  completedAt = new Date().toISOString(),
+  charterApproved = false,
+  charterVersion = null,
+} = {}) {
   const key = normalizeStageKey(stageKey);
+  if (key === SCOPING_STAGE_KEY && !charterApproved) {
+    throw new Error('Scoping 必须基于已批准的 Research Charter 才能完成。');
+  }
   const normalized = normalizeResearchStageState(state);
   if (normalized.currentStageKey !== key) {
     const current = RESEARCH_STAGES.find((stage) => stage.key === normalized.currentStageKey);
     throw new Error(`只能推进当前阶段；当前阶段是 ${current?.englishLabel || '无'}。`);
   }
-  const updatedAt = normalizeTimestamp(completedAt) || new Date().toISOString();
+  const updatedAt = normalizeStoredTimestamp(completedAt) || new Date().toISOString();
   const updated = {
     ...normalized,
     stages: {
       ...normalized.stages,
-      [key]: createResearchStageRecord({ status: 'completed', updatedAt }),
+      [key]: createResearchStageRecord({
+        status: 'completed',
+        updatedAt,
+        charterVersion: key === SCOPING_STAGE_KEY ? charterVersion : null,
+      }),
     },
   };
   return advanceAfterStage(updated, stageIndex(key));
@@ -190,6 +210,9 @@ export function completeResearchStage(state, stageKey, { completedAt = new Date(
 
 export function markResearchStageNotApplicable(state, stageKey, reason, { markedAt = new Date().toISOString() } = {}) {
   const key = normalizeStageKey(stageKey);
+  if (key === SCOPING_STAGE_KEY) {
+    throw new Error('Scoping 需要批准的 Research Charter，不能标记为不适用。');
+  }
   const normalizedReason = normalizeReason(reason);
   const normalized = normalizeResearchStageState(state);
   if (normalized.currentStageKey !== key) {
@@ -199,7 +222,7 @@ export function markResearchStageNotApplicable(state, stageKey, reason, { marked
   if (normalized.stages[key]?.status === 'completed') {
     throw new Error('已完成阶段不能标记为不适用。');
   }
-  const updatedAt = normalizeTimestamp(markedAt) || new Date().toISOString();
+  const updatedAt = normalizeStoredTimestamp(markedAt) || new Date().toISOString();
   const updated = {
     ...normalized,
     stages: {
@@ -230,13 +253,13 @@ export function reopenResearchStage(state, stageKey, { reopenedAt = new Date().t
       ...normalized.stages,
       [key]: {
         ...normalized.stages[key],
-        updatedAt: normalizeTimestamp(reopenedAt) || new Date().toISOString(),
+        updatedAt: normalizeStoredTimestamp(reopenedAt) || new Date().toISOString(),
       },
     },
   };
 }
 
-export function buildResearchStageGraph(value) {
+export function buildResearchStageGraph(value, { charterApproved = false, charterVersion = null } = {}) {
   const state = normalizeResearchStageState(value);
   const currentIndex = stageIndex(state.currentStageKey);
   const currentStageDefinition = RESEARCH_STAGES[currentIndex] || null;
@@ -268,22 +291,35 @@ export function buildResearchStageGraph(value) {
       lockReason,
       completedAt: record?.completedAt || null,
       notApplicableReason: record?.notApplicableReason || null,
+      charterVersion: record?.charterVersion || null,
     };
   });
   const currentStage = stages.find((stage) => stage.isCurrent) || null;
   const nextUnresolvedKey = currentIndex >= 0 ? nextUnresolvedStageKey(state.stages, currentIndex) : null;
   const nextUnresolved = RESEARCH_STAGES.find((stage) => stage.key === nextUnresolvedKey) || null;
-  const nextAction = currentStage
+  const nextAction = currentStage?.key === SCOPING_STAGE_KEY
     ? {
-        type: 'advance',
+        type: 'charter',
         stageKey: currentStage.key,
-        allowedActions: currentStage.isCompleted ? ['complete'] : ['complete', 'not-applicable'],
-        label: currentStage.isCompleted ? `完成 ${currentStage.englishLabel} 复核` : `完成 ${currentStage.englishLabel}`,
-        description: currentStage.isCompleted
-          ? `该阶段保留完成记录。完成本次复核后，${nextUnresolved?.englishLabel || 'Research Stage 图'}将成为下一步。`
-          : `完成 ${currentStage.englishLabel} 后，${nextUnresolved?.englishLabel || 'Research Stage 图'}将成为当前阶段；也可以记录原因并将此阶段标记为不适用。`,
+        allowedActions: ['review-charter'],
+        label: charterApproved
+          ? `批准 Research Charter${charterVersion ? ` v${charterVersion}` : ''} 并进入 Evidence`
+          : '审阅 Research Charter',
+        description: charterApproved
+          ? `Research Charter${charterVersion ? ` v${charterVersion}` : ''} 已批准。通过 Scoping Gate 后，Evidence 才会解锁。`
+          : 'Science Agent 会根据自然语言研究请求起草 Research Charter；你必须审阅并批准后，Research Project 才能进入 Evidence。',
       }
-    : {
+    : currentStage
+      ? {
+          type: 'advance',
+          stageKey: currentStage.key,
+          allowedActions: currentStage.isCompleted ? ['complete'] : ['complete', 'not-applicable'],
+          label: currentStage.isCompleted ? `完成 ${currentStage.englishLabel} 复核` : `完成 ${currentStage.englishLabel}`,
+          description: currentStage.isCompleted
+            ? `该阶段保留完成记录。完成本次复核后，${nextUnresolved?.englishLabel || 'Research Stage 图'}将成为下一步。`
+            : `完成 ${currentStage.englishLabel} 后，${nextUnresolved?.englishLabel || 'Research Stage 图'}将成为当前阶段；也可以记录原因并将此阶段标记为不适用。`,
+        }
+      : {
         type: 'complete',
         stageKey: null,
         allowedActions: [],

@@ -356,6 +356,93 @@
     </form>
   </dialog>
 
+  <dialog class="settings-dialog charter-dialog" id="charter-dialog">
+    <form id="charter-form">
+      <div class="dialog-header">
+        <div>
+          <div class="dialog-kicker">Scoping Gate // Research Charter</div>
+          <h2>审阅 Research Charter</h2>
+          <p>确认研究问题、贡献、边界、方法约束、成功标准与数据处理政策。批准后才能进入 Evidence。</p>
+        </div>
+        <button class="icon-button subtle" type="button" id="cancel-charter-icon" aria-label="关闭"><svg><use href="#i-x"/></svg></button>
+      </div>
+
+      <div class="dialog-body charter-dialog-body">
+        <div class="charter-gate-status" id="charter-status"></div>
+
+        <div class="charter-field-grid">
+          <label class="charter-field charter-field-wide" for="charter-question">
+            <span>研究问题 <small>Question</small></span>
+            <textarea id="charter-question" rows="3" maxlength="2000" required placeholder="要回答的、可检验的核心问题"></textarea>
+          </label>
+          <label class="charter-field charter-field-wide" for="charter-contribution">
+            <span>预期贡献 <small>Contribution</small></span>
+            <textarea id="charter-contribution" rows="3" maxlength="2000" required placeholder="本研究将澄清、整合或改变什么"></textarea>
+          </label>
+          <label class="charter-field" for="charter-scope">
+            <span>研究范围 <small>Scope</small></span>
+            <textarea id="charter-scope" rows="4" maxlength="3000" required placeholder="纳入与排除边界、时间范围、对象或数据范围"></textarea>
+          </label>
+          <label class="charter-field" for="charter-method-constraints">
+            <span>方法约束 <small>Method constraints</small></span>
+            <textarea id="charter-method-constraints" rows="4" maxlength="3000" required placeholder="必须遵守的研究设计、证据等级或分析限制"></textarea>
+          </label>
+          <label class="charter-field charter-field-wide" for="charter-success-criteria">
+            <span>成功标准 <small>Success criteria</small></span>
+            <textarea id="charter-success-criteria" rows="3" maxlength="3000" required placeholder="什么结果足以支持继续推进或交付"></textarea>
+          </label>
+          <label class="charter-field" for="charter-paper-type">
+            <span>论文类型 <small>Paper type</small></span>
+            <input id="charter-paper-type" type="text" maxlength="120" list="paper-type-options" required>
+          </label>
+          <label class="charter-field" for="charter-citation-style">
+            <span>引用格式 <small>Citation style</small></span>
+            <input id="charter-citation-style" type="text" maxlength="120" list="citation-style-options" required>
+          </label>
+          <label class="charter-field" for="charter-data-policy">
+            <span>数据处理政策 <small>Data Processing Policy</small></span>
+            <select id="charter-data-policy">
+              <option value="standard">标准 · 允许选定上下文发送给 Model Provider</option>
+              <option value="sensitive">敏感 · 每次外部传输前确认</option>
+              <option value="local-only">仅本地 · 首版禁止外部模型与检索</option>
+            </select>
+          </label>
+        </div>
+
+        <datalist id="paper-type-options">
+          <option value="Research article"></option>
+          <option value="Review"></option>
+          <option value="Systematic review"></option>
+          <option value="Methods paper"></option>
+          <option value="Protocol"></option>
+          <option value="Data paper"></option>
+          <option value="Perspective"></option>
+        </datalist>
+        <datalist id="citation-style-options">
+          <option value="Vancouver"></option>
+          <option value="Nature"></option>
+          <option value="APA 7"></option>
+          <option value="Chicago"></option>
+          <option value="IEEE"></option>
+        </datalist>
+
+        <details class="charter-revisions">
+          <summary>版本历史</summary>
+          <div id="charter-revision-list"></div>
+        </details>
+      </div>
+
+      <div class="dialog-footer charter-dialog-footer">
+        <span class="dialog-footnote" id="charter-footnote">批准后将完成 Scoping 并进入 Evidence。</span>
+        <div class="dialog-footer-actions">
+          <button type="button" class="secondary-button" id="cancel-charter">取消</button>
+          <button type="button" class="secondary-button" id="save-charter-draft">保存草稿</button>
+          <button type="button" class="primary-button" id="approve-charter">批准并进入 Evidence</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="settings-dialog" id="settings-dialog">
     <form method="dialog" id="settings-form">
       <div class="dialog-header">

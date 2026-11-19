@@ -254,6 +254,12 @@ export function createDaemonManager({
       maxTokens: Number(config.maxTokens) || defaultMaxTokens,
       evidenceMode: payload.evidenceMode !== false,
       mode: typeof payload.mode === 'string' ? payload.mode : 'auto',
+      projectId: typeof payload.projectId === 'string' ? payload.projectId : '',
+      stageKey: typeof payload.stageKey === 'string' ? payload.stageKey : null,
+      researchCharter: payload.researchCharter && typeof payload.researchCharter === 'object'
+        ? payload.researchCharter
+        : null,
+      charterDraftMode: payload.charterDraftMode === true,
     };
     runSenders.set(runId, sender);
     const timer = setTimeout(() => {

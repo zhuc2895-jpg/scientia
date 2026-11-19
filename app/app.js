@@ -1,4 +1,15 @@
 import {
+  DATA_POLICIES,
+  RESEARCH_CHARTER_FIELDS,
+  approveResearchCharter,
+  charterNeedsReapproval,
+  createInitialResearchCharterState,
+  currentApprovedResearchCharter,
+  currentResearchCharter,
+  normalizeResearchCharterState,
+  saveResearchCharterDraft,
+} from './research-charter.js';
+import {
   buildResearchStageGraph,
   completeResearchStage,
   createInitialResearchStageState,
@@ -65,6 +76,20 @@ const els = {
   stageNotApplicableTitle: $('#stage-na-title'),
   stageNotApplicableReason: $('#stage-na-reason'),
   stageNotApplicableConfirm: $('#confirm-stage-na'),
+  charterDialog: $('#charter-dialog'),
+  charterStatus: $('#charter-status'),
+  charterRevisionList: $('#charter-revision-list'),
+  charterSaveDraft: $('#save-charter-draft'),
+  charterApprove: $('#approve-charter'),
+  charterFootnote: $('#charter-footnote'),
+  charterQuestion: $('#charter-question'),
+  charterContribution: $('#charter-contribution'),
+  charterScope: $('#charter-scope'),
+  charterMethodConstraints: $('#charter-method-constraints'),
+  charterSuccessCriteria: $('#charter-success-criteria'),
+  charterPaperType: $('#charter-paper-type'),
+  charterCitationStyle: $('#charter-citation-style'),
+  charterDataPolicy: $('#charter-data-policy'),
   welcomeGreeting: $('#welcome-greeting'),
   contextWorkspaceName: $('#context-workspace-name'),
   conversationSearch: $('#conversation-search'),
@@ -510,6 +535,7 @@ function stageMutationBusy() {
 
 function stageStatusText(stage) {
   if (stage.isCurrent) return stage.isCompleted ? '当前阶段 · 复核中' : '当前阶段';
+  if (stage.isCompleted && stage.key === 'scoping' && stage.charterVersion) return `已完成 · Charter v${stage.charterVersion}`;
   if (stage.isCompleted) return stage.canReopen ? '已完成 · 可重新进入' : '已完成';
   if (stage.isNotApplicable) return '不适用';
   return '已锁定';
@@ -536,9 +562,11 @@ function renderResearchStages() {
       : stage.isCurrent
         ? stage.description
         : stage.isCompleted
-          ? stage.canReopen
-            ? '点击可重新进入该阶段并开展迭代复核。'
-            : '该阶段已完成并冻结。'
+          ? stage.key === 'scoping' && stage.charterVersion
+            ? `Research Charter v${stage.charterVersion} 已批准；点击可查看当前 Charter。`
+            : stage.canReopen
+              ? '点击可重新进入该阶段并开展迭代复核。'
+              : '该阶段已完成并冻结。'
           : stage.lockReason;
     const stateIcon = stage.isCurrent
       ? '<span class="stage-current-pip" aria-hidden="true"></span>'
@@ -559,13 +587,190 @@ function renderResearchStages() {
   }).join('');
   els.projectNextDescription.textContent = graph.nextAction.description;
   const actions = [];
+  if (graph.nextAction.allowedActions.includes('review-charter')) {
+    actions.push(`<button type="button" class="stage-primary-action" data-stage-action="charter"${busy ? ' disabled' : ''}>${escapeHTML(graph.nextAction.label)}</button>`);
+  }
   if (graph.nextAction.allowedActions.includes('complete')) {
     actions.push(`<button type="button" class="stage-primary-action" data-stage-action="complete"${busy ? ' disabled' : ''}>${escapeHTML(graph.nextAction.label)}</button>`);
   }
   if (graph.nextAction.allowedActions.includes('not-applicable')) {
     actions.push(`<button type="button" class="stage-secondary-action" data-stage-action="not-applicable"${busy ? ' disabled' : ''}>标记不适用</button>`);
   }
+  const charter = activeResearchCharterState();
+  if (graph.currentStageKey !== 'scoping' && charter?.current) {
+    const charterLabel = charter.current.status === 'approved'
+      ? `Charter v${charter.current.version}`
+      : `Charter v${charter.current.version} · 待批准`;
+    actions.push(`<button type="button" class="stage-secondary-action" data-stage-action="charter"${busy ? ' disabled' : ''}>${escapeHTML(charterLabel)}</button>`);
+  }
   els.projectStageActions.innerHTML = actions.join('');
+}
+
+function activeResearchCharterState() {
+  return state.project?.charter || null;
+}
+
+function researchCharterFieldElement(key) {
+  return {
+    question: els.charterQuestion,
+    contribution: els.charterContribution,
+    scope: els.charterScope,
+    methodConstraints: els.charterMethodConstraints,
+    successCriteria: els.charterSuccessCriteria,
+    paperType: els.charterPaperType,
+    citationStyle: els.charterCitationStyle,
+    dataPolicy: els.charterDataPolicy,
+  }[key] || null;
+}
+
+function emptyResearchCharter() {
+  const defaults = { paperType: 'Research article', citationStyle: 'Vancouver', dataPolicy: 'standard' };
+  return Object.fromEntries(RESEARCH_CHARTER_FIELDS.map(({ key }) => [key, defaults[key] || '']));
+}
+
+function researchCharterFormValues() {
+  return Object.fromEntries(RESEARCH_CHARTER_FIELDS.map(({ key }) => {
+    const element = researchCharterFieldElement(key);
+    return [key, element ? element.value.trim() : ''];
+  }));
+}
+
+function fillResearchCharterForm(charter) {
+  const value = { ...emptyResearchCharter(), ...(charter || {}) };
+  for (const { key } of RESEARCH_CHARTER_FIELDS) {
+    const element = researchCharterFieldElement(key);
+    if (element) element.value = value[key] || '';
+  }
+  if (!DATA_POLICIES.includes(value.dataPolicy)) els.charterDataPolicy.value = 'standard';
+}
+
+function validateResearchCharterForm() {
+  const values = researchCharterFormValues();
+  for (const field of RESEARCH_CHARTER_FIELDS) {
+    const value = values[field.key];
+    if (!value) return { error: `请填写 Research Charter 的${field.label}。`, field, values };
+    if (value.length > field.maxLength) return { error: `Research Charter 的${field.label}不能超过 ${field.maxLength} 个字符。`, field, values };
+  }
+  if (!DATA_POLICIES.includes(values.dataPolicy)) {
+    return { error: 'Research Charter 的数据处理政策无效。', field: { key: 'dataPolicy' }, values };
+  }
+  return { values, error: '' };
+}
+
+function focusCharterField(fieldKey) {
+  researchCharterFieldElement(fieldKey)?.focus();
+}
+
+function researchCharterStatusMarkup(charter) {
+  if (!charter?.current) {
+    return '<span class="charter-status-badge empty">尚未起草</span><p>先在研究输入框提交自然语言研究请求；Science Agent 会起草一份待审阅的 Research Charter。</p>';
+  }
+  if (charter.current.status === 'approved') {
+    return `<span class="charter-status-badge approved">v${charter.current.version} 已批准</span><p>当前 Research Run 将引用这个已批准版本。保存不同内容会创建新修订，并要求重新批准。</p>`;
+  }
+  if (charter.needsReapproval) {
+    return `<span class="charter-status-badge revision">v${charter.current.version} 待重新批准</span><p>此修订基于 v${charter.current.supersedes || charter.approvedVersion || '?'}。阶段图已回到 Scoping，批准前不能进入 Evidence。</p>`;
+  }
+  return `<span class="charter-status-badge draft">v${charter.current.version} 草稿</span><p>审阅并修改字段，然后通过 Scoping Gate 批准。批准后 Research Project 才能进入 Evidence。</p>`;
+}
+
+function renderResearchCharterDialog() {
+  const charter = activeResearchCharterState();
+  const graph = activeResearchStageGraph();
+  els.charterStatus.innerHTML = researchCharterStatusMarkup(charter);
+  const revisions = Array.isArray(charter?.revisions) ? [...charter.revisions].reverse() : [];
+  els.charterRevisionList.innerHTML = revisions.length
+    ? revisions.map((revision) => `
+        <div class="charter-revision-row">
+          <strong>v${revision.version}</strong>
+          <span class="charter-revision-status ${escapeHTML(revision.status)}">${revision.status === 'approved' ? '已批准' : '草稿'}</span>
+          <span>${revision.source === 'agent' ? 'Science Agent 起草' : '用户编辑'}</span>
+          <time>${escapeHTML(formatTime(revision.updatedAt))}</time>
+        </div>`).join('')
+    : '<div class="charter-revision-empty">批准或保存修订后，这里会保留版本历史。</div>';
+  const canApprove = graph?.currentStageKey === 'scoping';
+  els.charterApprove.hidden = !canApprove;
+  els.charterSaveDraft.textContent = charter?.current?.status === 'approved' ? '保存为新修订' : '保存草稿';
+  els.charterFootnote.textContent = graph?.currentStageKey === 'scoping'
+    ? '批准后将原子地完成 Scoping 并进入 Evidence。'
+    : '编辑已批准 Charter 会创建新修订并重新打开 Scoping Gate；已完成阶段记录与研究产出都会保留，批准后才能继续。';
+}
+
+function openResearchCharterDialog() {
+  if (stageMutationBusy()) {
+    showToast('Research Run 进行中，暂不能编辑 Research Charter。');
+    return;
+  }
+  if (!activeResearchProject()) {
+    openResearchProjectDialog();
+    return;
+  }
+  const charter = activeResearchCharterState();
+  const editable = charter?.current || charter?.approved || charter?.revisions?.at(-1) || emptyResearchCharter();
+  fillResearchCharterForm(editable);
+  renderResearchCharterDialog();
+  if (!els.charterDialog.open) els.charterDialog.showModal();
+  requestAnimationFrame(() => els.charterQuestion.focus());
+}
+
+function closeResearchCharterDialog() {
+  if (els.charterDialog?.open) els.charterDialog.close();
+}
+
+async function saveResearchCharterDraftFromGate({ closeAfter = false } = {}) {
+  const validation = validateResearchCharterForm();
+  if (validation.error) {
+    showToast(validation.error);
+    focusCharterField(validation.field?.key);
+    return;
+  }
+  const previousCharter = activeResearchCharterState();
+  const previousVersion = previousCharter?.current?.version || null;
+  const previousApproved = previousCharter?.current?.status === 'approved';
+  els.charterSaveDraft.disabled = true;
+  els.charterApprove.disabled = true;
+  els.charterSaveDraft.textContent = '正在保存…';
+  try {
+    const productState = await bridge.projectCharterSaveDraft({ charter: validation.values, source: 'user' });
+    applyProductState(productState);
+    renderAll();
+    renderResearchCharterDialog();
+    if (closeAfter) closeResearchCharterDialog();
+    const revisionCreated = previousApproved && activeResearchCharterState()?.current?.version !== previousVersion;
+    showToast(revisionCreated ? 'Research Charter 新修订已保存，需要重新批准。' : 'Research Charter 草稿已保存。');
+  } catch (error) {
+    showToast(error.message || '无法保存 Research Charter。', 5000);
+  } finally {
+    els.charterSaveDraft.disabled = false;
+    els.charterApprove.disabled = false;
+    if (els.charterDialog.open) renderResearchCharterDialog();
+  }
+}
+
+async function approveResearchCharterFromGate() {
+  const validation = validateResearchCharterForm();
+  if (validation.error) {
+    showToast(validation.error);
+    focusCharterField(validation.field?.key);
+    return;
+  }
+  els.charterSaveDraft.disabled = true;
+  els.charterApprove.disabled = true;
+  const previousLabel = els.charterApprove.textContent;
+  els.charterApprove.textContent = '正在批准…';
+  try {
+    const productState = await bridge.projectCharterApprove({ charter: validation.values });
+    closeResearchCharterDialog();
+    applyProductState(productState);
+    renderAll();
+    showToast('Research Charter 已批准。Scoping Gate 已通过，Evidence 已解锁。');
+  } catch (error) {
+    showToast(error.message || '无法批准 Research Charter。', 5000);
+  } finally {
+    els.charterSaveDraft.disabled = false;
+    els.charterApprove.disabled = false;
+    els.charterApprove.textContent = previousLabel;
+  }
 }
 
 async function applyResearchStageProductState(operation, message) {
@@ -1143,7 +1348,7 @@ function updateRunningStatus() {
   if (node) node.textContent = message.statusText;
 }
 
-function completeRun(event) {
+async function completeRun(event) {
   if (!state.activeRun) return;
   const run = state.activeRun;
   const conversation = state.conversations.find((item) => item.id === run.conversationId);
@@ -1163,12 +1368,30 @@ function completeRun(event) {
     conversation.activities = conversation.activities.map((activity) => ({ ...activity, status: 'done' }));
     conversation.activities.push({ id: uid(), label: '研究结果已返回', status: 'done', time: nowISO() });
   }
+  let charterSaved = false;
+  if (event.charterDraft) {
+    try {
+      const productState = await bridge.projectCharterSaveDraft({
+        charter: event.charterDraft,
+        source: 'agent',
+        generatedByRunId: run.runId,
+      });
+      applyProductState(productState);
+      charterSaved = true;
+      showToast('Science Agent 已起草 Research Charter，请审阅并批准。', 5000);
+    } catch (error) {
+      showToast(error.message || 'Science Agent 已生成 Charter，但无法保存草稿。', 6000);
+    }
+  } else if (event.charterDraftError) {
+    showToast(event.charterDraftError, 6000);
+  }
   clearInterval(state.elapsedTimer);
   state.activeRun = null;
   if (conversation) void persistConversation(conversation);
   renderAll();
   scrollMessagesToBottom();
   void refreshWorkspace();
+  if (charterSaved) setTimeout(openResearchCharterDialog, 120);
 }
 
 function failRun(event) {
@@ -1233,7 +1456,7 @@ function handleAgentEvent(event) {
     return;
   }
   if (event.type === 'result') {
-    completeRun(event);
+    void completeRun(event);
     return;
   }
   if (event.type === 'cancelled') {
@@ -1267,7 +1490,6 @@ async function sendResearchTask({ promptOverride = null, displayContent = null, 
     showToast('DeepSeek Harness 尚未就绪。');
     return;
   }
-
   let conversation = await ensureConversation();
   if (!conversation) return;
   const researchMode = els.researchMode?.value || conversation.researchMode || 'auto';
@@ -1599,6 +1821,10 @@ function bindEvents() {
     const action = event.target.closest('[data-stage-action]');
     if (action) {
       const graph = activeResearchStageGraph();
+      if (action.dataset.stageAction === 'charter') {
+        openResearchCharterDialog();
+        return;
+      }
       if (!graph?.currentStage) return;
       if (action.dataset.stageAction === 'complete') completeCurrentResearchStage(graph.currentStage.key);
       else if (action.dataset.stageAction === 'not-applicable') openStageNotApplicableDialog(graph.currentStage.key);
@@ -1610,7 +1836,8 @@ function bindEvents() {
     if (!stage) return;
     if (stage.isCurrent) return;
     if (stage.isCompleted) {
-      if (stage.canReopen) reopenCompletedResearchStage(stage.key);
+      if (stage.key === 'scoping') openResearchCharterDialog();
+      else if (stage.canReopen) reopenCompletedResearchStage(stage.key);
       else showToast(`${stage.englishLabel} 已完成并冻结。`);
       return;
     }
@@ -1625,6 +1852,11 @@ function bindEvents() {
   $('#cancel-stage-na').addEventListener('click', closeStageNotApplicableDialog);
   $('#cancel-stage-na-icon').addEventListener('click', closeStageNotApplicableDialog);
   els.stageNotApplicableDialog.addEventListener('close', () => { state.pendingStageNotApplicableKey = null; });
+
+  els.charterSaveDraft.addEventListener('click', () => void saveResearchCharterDraftFromGate());
+  els.charterApprove.addEventListener('click', () => void approveResearchCharterFromGate());
+  $('#cancel-charter').addEventListener('click', closeResearchCharterDialog);
+  $('#cancel-charter-icon').addEventListener('click', closeResearchCharterDialog);
 
   els.conversationList.addEventListener('click', (event) => {
     const deleteButton = event.target.closest('[data-delete-conversation]');
@@ -1892,14 +2124,32 @@ function createPreviewBridge() {
   }];
   let previewActiveProjectId = previewProjects[0].id;
   const previewStageStates = new Map([[previewActiveProjectId, createInitialResearchStageState()]]);
+  const previewCharterStates = new Map([[previewActiveProjectId, createInitialResearchCharterState()]]);
   const previewConversationsByProject = new Map([[previewActiveProjectId, []]]);
   const previewActiveConversationByProject = new Map([[previewActiveProjectId, null]]);
   let previewMigrationComplete = false;
   const previewProject = () => previewProjects.find((project) => project.id === previewActiveProjectId) || null;
-  const previewSerializeProject = (project) => (project ? {
-    ...structuredClone(project),
-    stageGraph: buildResearchStageGraph(normalizeResearchStageState(previewStageStates.get(project.id) || createInitialResearchStageState())),
-  } : null);
+  const previewSerializeProject = (project) => {
+    if (!project) return null;
+    const charterState = normalizeResearchCharterState(previewCharterStates.get(project.id) || createInitialResearchCharterState());
+    const approvedCharter = currentApprovedResearchCharter(charterState);
+    const currentCharter = currentResearchCharter(charterState);
+    return {
+      ...structuredClone(project),
+      charter: {
+        currentVersion: charterState.currentVersion,
+        approvedVersion: charterState.approvedVersion,
+        needsReapproval: charterNeedsReapproval(charterState),
+        current: currentCharter,
+        approved: approvedCharter,
+        revisions: charterState.revisions,
+      },
+      stageGraph: buildResearchStageGraph(
+        normalizeResearchStageState(previewStageStates.get(project.id) || createInitialResearchStageState()),
+        { charterApproved: Boolean(approvedCharter), charterVersion: approvedCharter?.version || currentCharter?.version || null },
+      ),
+    };
+  };
   const previewProductState = () => ({
     projects: previewProjects.map(previewSerializeProject),
     activeProjectId: previewActiveProjectId,
@@ -1940,6 +2190,7 @@ function createPreviewBridge() {
       const workspacePath = `${previewWorkspace} Managed ${id}`;
       previewProjects.unshift({ id, name, workspacePath, workspaceKind: 'managed', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archivedAt: null });
       previewStageStates.set(id, createInitialResearchStageState());
+      previewCharterStates.set(id, createInitialResearchCharterState());
       previewConversationsByProject.set(id, []);
       previewActiveConversationByProject.set(id, null);
       previewActiveProjectId = id;
@@ -1951,6 +2202,7 @@ function createPreviewBridge() {
       const workspacePath = `${previewWorkspace} Imported ${id}`;
       previewProjects.unshift({ id, name, workspacePath, workspaceKind: 'imported', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archivedAt: null });
       previewStageStates.set(id, createInitialResearchStageState());
+      previewCharterStates.set(id, createInitialResearchCharterState());
       previewConversationsByProject.set(id, []);
       previewActiveConversationByProject.set(id, null);
       previewActiveProjectId = id;
@@ -1983,15 +2235,60 @@ function createPreviewBridge() {
       if (index < 0) throw new Error('无法删除 Research Project。');
       const deletedProject = previewProjects.splice(index, 1)[0];
       previewStageStates.delete(id);
+      previewCharterStates.delete(id);
       previewConversationsByProject.delete(id);
       previewActiveConversationByProject.delete(id);
       if (previewActiveProjectId === id) previewActiveProjectId = previewProjects.find((item) => !item.archivedAt)?.id || null;
       previewConfig.workspace = previewProject()?.workspacePath || '';
       return { ...previewProductState(), deletedProject };
     },
+    async projectCharterSaveDraft({ charter, source = 'user', generatedByRunId = null }) {
+      const previous = normalizeResearchCharterState(previewCharterStates.get(previewActiveProjectId) || createInitialResearchCharterState());
+      const previousCurrent = currentResearchCharter(previous);
+      const next = saveResearchCharterDraft(previous, charter, {
+        source,
+        updatedAt: new Date().toISOString(),
+        generatedByRunId,
+      });
+      const nextCurrent = currentResearchCharter(next);
+      if (previousCurrent?.status === 'approved' && nextCurrent?.version !== previousCurrent.version) {
+        const currentStage = normalizeResearchStageState(
+          previewStageStates.get(previewActiveProjectId) || createInitialResearchStageState(),
+        );
+        previewStageStates.set(previewActiveProjectId, { ...currentStage, currentStageKey: 'scoping' });
+      }
+      previewCharterStates.set(previewActiveProjectId, next);
+      return previewProductState();
+    },
+    async projectCharterApprove({ charter }) {
+      const previous = normalizeResearchCharterState(previewCharterStates.get(previewActiveProjectId) || createInitialResearchCharterState());
+      const timestamp = new Date().toISOString();
+      const drafted = saveResearchCharterDraft(previous, charter, { source: 'user', updatedAt: timestamp });
+      const approved = approveResearchCharter(drafted, { approvedAt: timestamp });
+      previewCharterStates.set(previewActiveProjectId, approved);
+      const current = previewStageStates.get(previewActiveProjectId) || createInitialResearchStageState();
+      previewStageStates.set(
+        previewActiveProjectId,
+        completeResearchStage(current, 'scoping', {
+          completedAt: timestamp,
+          charterApproved: true,
+          charterVersion: currentApprovedResearchCharter(approved)?.version || null,
+        }),
+      );
+      return previewProductState();
+    },
     async projectStageComplete(stageKey) {
       const current = previewStageStates.get(previewActiveProjectId) || createInitialResearchStageState();
-      previewStageStates.set(previewActiveProjectId, completeResearchStage(current, stageKey));
+      const approvedCharter = currentApprovedResearchCharter(
+        previewCharterStates.get(previewActiveProjectId) || createInitialResearchCharterState(),
+      );
+      previewStageStates.set(
+        previewActiveProjectId,
+        completeResearchStage(current, stageKey, {
+          charterApproved: Boolean(approvedCharter),
+          charterVersion: approvedCharter?.version || null,
+        }),
+      );
       return previewProductState();
     },
     async projectStageNotApplicable({ stageKey, reason }) {
@@ -2053,6 +2350,24 @@ function createPreviewBridge() {
       return tokens.map((_token, index) => ({ name: `file-${index + 1}`, relativePath: `.science/inputs/demo/${index + 1}-file`, size: 1024 }));
     },
     async runAgent(payload) {
+      const charterState = normalizeResearchCharterState(
+        previewCharterStates.get(previewActiveProjectId) || createInitialResearchCharterState(),
+      );
+      const stageState = normalizeResearchStageState(
+        previewStageStates.get(previewActiveProjectId) || createInitialResearchStageState(),
+      );
+      const approvedCharter = currentApprovedResearchCharter(charterState);
+      const charterDraftMode = stageState.currentStageKey === 'scoping' && !approvedCharter;
+      const charterDraft = charterDraftMode ? {
+        question: '该研究请求需要回答的核心科学问题是什么？',
+        contribution: '把用户请求转化为可审查、可执行的研究边界与交付标准。',
+        scope: '根据当前 Research Workspace 中可用的资料和用户指定范围确定。',
+        methodConstraints: '优先使用可核验来源，区分观察、推断与未知，并保留来源定位。',
+        successCriteria: '形成可追溯证据记录，并交付与研究问题匹配的研究产物。',
+        paperType: 'Review',
+        citationStyle: 'Vancouver',
+        dataPolicy: 'standard',
+      } : null;
       const response = `## 当前版本的研究界面
 
 这是浏览器预览模式。桌面版会把同一任务交给 **DeepSeek Harness \`sdk-minimal\`** 执行，并由同一个 Science Agent 完成工具循环。
@@ -2085,7 +2400,13 @@ function createPreviewBridge() {
               { id: 'artifacts', status: 'pass', label: '研究产出', detail: '生成 2 个文件。' },
             ],
           },
-          run: { outputDir: '.science/outputs/preview', evidencePath: '.science/evidence/preview.jsonl' },
+          charterDraft,
+          run: {
+            outputDir: '.science/outputs/preview',
+            evidencePath: '.science/evidence/preview.jsonl',
+            stageKey: stageState.currentStageKey,
+            researchCharterVersion: approvedCharter?.version || null,
+          },
         }), 800);
       }, 700);
       return { accepted: true };

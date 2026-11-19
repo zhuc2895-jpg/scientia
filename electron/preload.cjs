@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('scienceAgent', {
   projectArchive: (id) => ipcRenderer.invoke('project:archive', id),
   projectRestore: (id) => ipcRenderer.invoke('project:restore', id),
   projectDelete: (payload) => ipcRenderer.invoke('project:delete', payload),
+  projectCharterSaveDraft: (payload) => ipcRenderer.invoke('project:charter-save-draft', payload),
+  projectCharterApprove: (payload) => ipcRenderer.invoke('project:charter-approve', payload),
   projectStageComplete: (stageKey) => ipcRenderer.invoke('project:stage-complete', stageKey),
   projectStageNotApplicable: (payload) => ipcRenderer.invoke('project:stage-not-applicable', payload),
   projectStageReopen: (stageKey) => ipcRenderer.invoke('project:stage-reopen', stageKey),

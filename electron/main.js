@@ -394,7 +394,19 @@ async function runAgent(payload, sender) {
   if (!state.activeProjectId || conversationProjectId !== state.activeProjectId || !researchWorkspace) {
     throw new Error('只能运行当前 Research Project 中的 Conversation。');
   }
-  return runtimeManager.run(payload, sender, researchWorkspace);
+  const stageKey = state.project?.stageGraph?.currentStageKey || null;
+  const approvedCharter = state.project?.charter?.approved || null;
+  if (stageKey !== 'scoping' && !approvedCharter) {
+    throw new Error('进入 Evidence 后，Research Run 必须引用当前已批准的 Research Charter。');
+  }
+  const enrichedPayload = {
+    ...payload,
+    projectId: state.activeProjectId,
+    stageKey,
+    researchCharter: approvedCharter,
+    charterDraftMode: stageKey === 'scoping' && !approvedCharter,
+  };
+  return runtimeManager.run(enrichedPayload, sender, researchWorkspace);
 }
 
 async function cancelAgent(runId) {
@@ -487,6 +499,19 @@ function installIpc() {
     });
   });
 
+  ipcMain.handle('project:charter-save-draft', (_event, payload) => {
+    const source = payload?.source === 'agent' ? 'agent' : 'user';
+    if (source !== 'agent') assertNoActiveResearchRun();
+    return productRepository.saveResearchCharterDraft({
+      charter: payload?.charter,
+      source,
+      generatedByRunId: typeof payload?.generatedByRunId === 'string' ? payload.generatedByRunId : null,
+    });
+  });
+  ipcMain.handle('project:charter-approve', (_event, payload) => {
+    assertNoActiveResearchRun();
+    return productRepository.approveResearchCharter({ charter: payload?.charter });
+  });
   ipcMain.handle('project:stage-complete', (_event, stageKey) => {
     assertNoActiveResearchRun();
     return productRepository.completeResearchStage(stageKey);

@@ -16,7 +16,7 @@ function run(label, command, args) {
   console.log(`OK   ${label}`);
 }
 
-for (const file of ['app/app.js', 'app/conversation-state.js', 'app/research-stages.js', 'electron/app-lifecycle.js', 'electron/config-store.js', 'electron/import-authorizer.js', 'electron/main.js', 'electron/native-secret-input.js', 'electron/path-boundary.js', 'electron/product-repository.js', 'electron/research-project-lifecycle.js', 'electron/project-workspace.js', 'electron/run-recovery.js', 'electron/runtime.js', 'electron/workspace-paths.js', 'electron/preload.cjs']) {
+for (const file of ['app/app.js', 'app/conversation-state.js', 'app/research-charter.js', 'app/research-stages.js', 'electron/app-lifecycle.js', 'electron/config-store.js', 'electron/import-authorizer.js', 'electron/main.js', 'electron/native-secret-input.js', 'electron/path-boundary.js', 'electron/product-repository.js', 'electron/research-project-lifecycle.js', 'electron/project-workspace.js', 'electron/run-recovery.js', 'electron/runtime.js', 'electron/workspace-paths.js', 'electron/preload.cjs']) {
   run(`syntax ${file}`, process.execPath, ['--check', file]);
 }
 run('Application state tests', process.execPath, [
@@ -27,6 +27,7 @@ run('Application state tests', process.execPath, [
   'electron/tests/import-authorizer.test.mjs',
   'electron/tests/native-secret-input.test.mjs',
   'electron/tests/product-repository.test.mjs',
+  'electron/tests/research-charter.test.mjs',
   'electron/tests/research-project-lifecycle.test.mjs',
   'electron/tests/research-stages.test.mjs',
   'electron/tests/project-workspace.test.mjs',

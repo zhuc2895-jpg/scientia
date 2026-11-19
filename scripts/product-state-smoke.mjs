@@ -280,9 +280,22 @@ try {
   assert.equal(await evaluate(cdp, `document.querySelectorAll('.project-stage-card').length`), 6);
   assert.equal(await evaluate(cdp, `document.querySelector('[data-stage-card="evidence"]')?.classList.contains('pending')`), true);
   assert.match(await evaluate(cdp, `document.querySelector('[data-stage-card="evidence"]')?.title || ''`), /Scoping/);
-  await evaluate(cdp, `document.querySelector('[data-stage-action="complete"]').click()`);
+  await evaluate(cdp, `(() => {
+    document.querySelector('[data-stage-action="charter"]').click();
+    document.querySelector('#charter-question').value = 'How should the smoke-test evidence be interpreted?';
+    document.querySelector('#charter-contribution').value = 'Verify the Scoping Gate.';
+    document.querySelector('#charter-scope').value = 'Only synthetic project data.';
+    document.querySelector('#charter-method-constraints').value = 'Do not fabricate evidence.';
+    document.querySelector('#charter-success-criteria').value = 'A traceable stage transition.';
+    document.querySelector('#charter-paper-type').value = 'Research article';
+    document.querySelector('#charter-citation-style').value = 'Vancouver';
+    document.querySelector('#charter-data-policy').value = 'standard';
+    document.querySelector('#approve-charter').click();
+    return true;
+  })()`);
   stageState = await waitForResearchStage(cdp, 'evidence');
   assert.equal(stageState.project.stageGraph.stages.find((stage) => stage.key === 'scoping').status, 'completed');
+  assert.equal(stageState.project.charter.approved.question, 'How should the smoke-test evidence be interpreted?');
   assert.match(await evaluate(cdp, `document.querySelector('[data-stage-card="synthesis"]')?.title || ''`), /Evidence/);
   await evaluate(cdp, `(() => {
     document.querySelector('[data-stage-action="not-applicable"]').click();

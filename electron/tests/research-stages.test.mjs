@@ -13,7 +13,7 @@ import {
 const timestamp = '2026-11-18T10:00:00.000Z';
 
 test('the initial stage graph exposes the six ordered research stages and a concrete next action', () => {
-  const graph = buildResearchStageGraph(createInitialResearchStageState());
+  const graph = buildResearchStageGraph(createInitialResearchStageState(), { charterApproved: false });
 
   assert.deepEqual(
     graph.stages.map((stage) => stage.englishLabel),
@@ -25,17 +25,24 @@ test('the initial stage graph exposes the six ordered research stages and a conc
   assert.equal(graph.stages[1].status, 'pending');
   assert.equal(graph.stages[1].isLocked, true);
   assert.match(graph.stages[1].lockReason, /Scoping/);
-  assert.deepEqual(graph.nextAction.allowedActions, ['complete', 'not-applicable']);
+  assert.deepEqual(graph.nextAction.allowedActions, ['review-charter']);
+  assert.equal(graph.nextAction.type, 'charter');
+  assert.match(graph.nextAction.description, /Charter/);
   assert.match(graph.nextAction.description, /Evidence/);
 });
 
 test('completing the current stage advances the graph and survives serialization', () => {
-  const completed = completeResearchStage(createInitialResearchStageState(), 'scoping', { completedAt: timestamp });
+  const completed = completeResearchStage(createInitialResearchStageState(), 'scoping', {
+    completedAt: timestamp,
+    charterApproved: true,
+    charterVersion: 3,
+  });
   const graph = buildResearchStageGraph(completed);
 
   assert.equal(graph.currentStageKey, 'evidence');
   assert.equal(graph.stages[0].status, 'completed');
   assert.equal(graph.stages[0].completedAt, timestamp);
+  assert.equal(graph.stages[0].charterVersion, 3);
   assert.equal(graph.stages[1].status, 'current');
   assert.equal(graph.stages[2].isLocked, true);
   assert.match(graph.stages[2].lockReason, /Evidence/);
@@ -45,7 +52,10 @@ test('completing the current stage advances the graph and survives serialization
 });
 
 test('a stage can be explicitly skipped only with a recorded reason', () => {
-  const initial = completeResearchStage(createInitialResearchStageState(), 'scoping', { completedAt: timestamp });
+  const initial = completeResearchStage(createInitialResearchStageState(), 'scoping', {
+    completedAt: timestamp,
+    charterApproved: true,
+  });
 
   assert.throws(
     () => markResearchStageNotApplicable(initial, 'evidence', '   ', { markedAt: timestamp }),
@@ -62,7 +72,10 @@ test('a stage can be explicitly skipped only with a recorded reason', () => {
 });
 
 test('iterative stages can be re-entered without erasing completed records', () => {
-  let state = completeResearchStage(createInitialResearchStageState(), 'scoping', { completedAt: timestamp });
+  let state = completeResearchStage(createInitialResearchStageState(), 'scoping', {
+    completedAt: timestamp,
+    charterApproved: true,
+  });
   state = completeResearchStage(state, 'evidence', { completedAt: timestamp });
   state = reopenResearchStage(state, 'evidence', { reopenedAt: timestamp });
 
@@ -81,7 +94,7 @@ test('iterative stages can be re-entered without erasing completed records', () 
 test('all six stages can reach a terminal graph', () => {
   let state = createInitialResearchStageState();
   for (const key of ['scoping', 'evidence', 'inquiry', 'synthesis', 'manuscript', 'release']) {
-    state = completeResearchStage(state, key, { completedAt: timestamp });
+    state = completeResearchStage(state, key, { completedAt: timestamp, charterApproved: key === 'scoping' });
   }
 
   const graph = buildResearchStageGraph(normalizeResearchStageState(JSON.parse(JSON.stringify(state))));
@@ -94,6 +107,8 @@ test('all six stages can reach a terminal graph', () => {
 test('out-of-order and unknown stage mutations are rejected', () => {
   const initial = createInitialResearchStageState();
 
+  assert.throws(() => completeResearchStage(initial, 'scoping', { completedAt: timestamp }), /Charter/);
+  assert.throws(() => markResearchStageNotApplicable(initial, 'scoping', 'Skip it.', { markedAt: timestamp }), /Charter/);
   assert.throws(() => completeResearchStage(initial, 'evidence', { completedAt: timestamp }), /当前阶段/);
   assert.throws(() => completeResearchStage(initial, 'not-a-stage', { completedAt: timestamp }), /阶段/);
   assert.throws(() => reopenResearchStage(initial, 'scoping', { reopenedAt: timestamp }), /Evidence/);

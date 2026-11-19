@@ -5,7 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from science_agent.research_runtime import assess_result, finalize_research_run, prepare_research_run
+from science_agent.research_runtime import (
+    assess_result,
+    extract_research_charter,
+    finalize_research_run,
+    prepare_research_run,
+)
 
 
 class ResearchRuntimeTests(unittest.TestCase):
@@ -74,7 +79,98 @@ class ResearchRuntimeTests(unittest.TestCase):
         self.assertGreaterEqual(quality["warnings"], 3)
         artifact_check = next(check for check in quality["checks"] if check["id"] == "artifacts")
         self.assertEqual(artifact_check["status"], "warn")
+    def test_prepare_and_finalize_reference_approved_research_charter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            charter = {
+                "version": 3,
+                "status": "approved",
+                "question": "Which intervention improves the outcome?",
+                "contribution": "Resolve conflicting evidence.",
+                "scope": "Adults in randomized trials.",
+                "methodConstraints": "Prefer primary studies.",
+                "successCriteria": "Traceable synthesis.",
+                "paperType": "Review",
+                "citationStyle": "Vancouver",
+                "dataPolicy": "sensitive",
+                "approvedAt": "2026-11-19T00:00:00+00:00",
+            }
+            context = prepare_research_run(
+                workspace,
+                conversation_id="conversation-charter",
+                run_id="run-charter",
+                prompt="Continue the evidence review.",
+                model="deepseek-v4-flash",
+                research_charter=charter,
+                stage_key="evidence",
+                project_id="project-1",
+            )
 
+            brief = (workspace / context["briefPath"]).read_text(encoding="utf-8")
+            self.assertIn("Approved Research Charter v3", brief)
+            self.assertIn("Data Processing Policy: `sensitive`", brief)
+            self.assertIn("Research stage: `evidence`", brief)
+
+            result = finalize_research_run(
+                workspace,
+                run_context=context,
+                result_text="Observed a limitation.",
+                prompt="Continue the evidence review.",
+                status="completed",
+            )
+            manifest_path = workspace / ".science" / "runs" / context["sessionKey"] / context["runKey"] / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["researchCharter"]["version"], 3)
+            self.assertEqual(manifest["stageKey"], "evidence")
+            self.assertEqual(manifest["projectId"], "project-1")
+            self.assertEqual(result["run"]["projectId"], "project-1")
+            self.assertEqual(result["run"]["researchCharterVersion"], 3)
+
+    def test_charter_draft_mode_requires_a_structured_charter_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            context = prepare_research_run(
+                workspace,
+                conversation_id="conversation-scoping",
+                run_id="run-scoping",
+                prompt="Study intermittent fasting.",
+                model="deepseek-v4-flash",
+                stage_key="scoping",
+                charter_draft_mode=True,
+            )
+
+            self.assertIn("research-charter.json", context["promptSuffix"])
+            output_dir = workspace / context["outputDir"]
+            charter = {
+                "question": "How does intermittent fasting affect metabolic health?",
+                "contribution": "Reconcile randomized trial evidence.",
+                "scope": "Adults without diagnosed metabolic disease.",
+                "methodConstraints": "Prefer randomized trials.",
+                "successCriteria": "A traceable evidence map.",
+                "paperType": "Review",
+                "citationStyle": "Vancouver",
+                "dataPolicy": "standard",
+            }
+            (output_dir / "research-charter.json").write_text(json.dumps(charter), encoding="utf-8")
+
+            extracted = extract_research_charter(workspace, output_dir, "Drafted the charter.")
+            self.assertEqual(extracted["question"], charter["question"])
+            self.assertEqual(extracted["dataPolicy"], "standard")
+
+    def test_charter_extraction_falls_back_to_fenced_json_in_the_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            output_dir = workspace / "outputs"
+            output_dir.mkdir()
+            text = """The draft is ready.
+
+```json
+{"question":"Q","contribution":"C","scope":"S","methodConstraints":"M","successCriteria":"K","paperType":"Review","citationStyle":"APA 7","dataPolicy":"standard"}
+```
+"""
+            extracted = extract_research_charter(workspace, output_dir, text)
+            self.assertEqual(extracted["question"], "Q")
+            self.assertEqual(extracted["citationStyle"], "APA 7")
 
 if __name__ == "__main__":
     unittest.main()
