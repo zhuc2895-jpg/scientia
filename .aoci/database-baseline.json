@@ -1,0 +1,81 @@
+{
+  "version": "database-evidence-baseline/v1",
+  "sources": [
+    {
+      "source_id": "scientia_product",
+      "engine": "sqlite",
+      "database": "C:\\Users\\iop\\AppData\\Roaming\\scientia-science-agent\\scientia-product.sqlite3",
+      "namespaces": [
+        "main"
+      ],
+      "include_namespaces": [],
+      "exclude_namespaces": [],
+      "include_tables": [
+        "app_state",
+        "checkpoints",
+        "conversations",
+        "projects"
+      ],
+      "exclude_tables": [],
+      "case_semantics": {
+        "identifier_case": "preserve_ascii_case_insensitive"
+      },
+      "evidence_version": "database-evidence/v1",
+      "source_snapshot_sha256": "d2b18c67d3c14ece2fd51e0246b59fe67f56a2e0062f3f8da7997b629e865f9c",
+      "tables": [
+        {
+          "object_ref": "database://scientia_product/main/app_state",
+          "table_evidence_sha256": "f5cdea2d9ca213f5800980c3d51cebb41687699eb1a44c1503fa5b8af4a1079d",
+          "component_hashes": {
+            "columns": "95893c6a905a7d7b8121e1b35f09a646df19883a8099723e8787e3ea6cba75da",
+            "primary_key": "7e257908cc00de098713acc9865a67e638f7568006688b7322078fcfc0c81435",
+            "unique_constraints": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "foreign_keys": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "checks": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "indexes": "f64d9404b763fe26404fcc1768855336f65d7db9480f93a4c73c52ffc31dcf92",
+            "partition": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+          }
+        },
+        {
+          "object_ref": "database://scientia_product/main/checkpoints",
+          "table_evidence_sha256": "0a183a7abcdf73675b2a6446934c58a93cabcaf1a0a865f29d1706d0972471b2",
+          "component_hashes": {
+            "columns": "bd094704160da54a703725207476d35fbb53e1b0027125aa0caece0fdc3b092c",
+            "primary_key": "72600e39cee054d3648366236e95614b07942c37d7913e85a2b0be9ad3abe0ed",
+            "unique_constraints": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "foreign_keys": "428465851dff9a7139fd8017e6027658e0e3cf15d605fd2dcb56857fb8590acb",
+            "checks": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "indexes": "6b6eaadc26b85eedcaaaf755580cb82be9c29e2d9fd8efc68a1df9bd711ffaf7",
+            "partition": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+          }
+        },
+        {
+          "object_ref": "database://scientia_product/main/conversations",
+          "table_evidence_sha256": "1164d6f209534f6d9b7c0820275b3aedf884f3d45d9e59765c9805c4a07b18d4",
+          "component_hashes": {
+            "columns": "72623f0fe86485bd549f49755de56f4406d203020dae8bdf6f85d6d9df177d48",
+            "primary_key": "72600e39cee054d3648366236e95614b07942c37d7913e85a2b0be9ad3abe0ed",
+            "unique_constraints": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "foreign_keys": "7bcc892fe0787116bb86ec921f8382de5b00e3d75503b50c94646e4f2537dac5",
+            "checks": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "indexes": "f4b60cc8fb4f9cef208c2a4b5a95c38747feecea2724523e2df052cf48302255",
+            "partition": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+          }
+        },
+        {
+          "object_ref": "database://scientia_product/main/projects",
+          "table_evidence_sha256": "4f2fdcce5d5ff0dfed5a78c83382efeeeedea9a3850e549dd6ab119a1bba0303",
+          "component_hashes": {
+            "columns": "bb0be42cbcf3d7939eb945a3373748a770600e32e59345f62285e167c0296f18",
+            "primary_key": "72600e39cee054d3648366236e95614b07942c37d7913e85a2b0be9ad3abe0ed",
+            "unique_constraints": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "foreign_keys": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "checks": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+            "indexes": "b701b3edbe4a96e64e40b5ee9b9082231074916a01da15745e2ed76691dbda34",
+            "partition": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+          }
+        }
+      ]
+    }
+  ]
+}

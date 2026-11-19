@@ -1,0 +1,7 @@
+#AOCI-DATABASE-VOLUME: 1
+
+===scientia_product/main/database://scientia_product/main/===
+app_state[KC7T]: F:保存当前 Project、当前 Conversation 与一次性迁移标记等应用级键值状态 | R:database://scientia_product/main/projects,database://scientia_product/main/conversations,code:electron/product-repository.js | A:应用启动恢复与数据库迁移 | S:该表无外键，value 中的实体引用可能暂时失效；只存 ID、标记和非秘密配置，不能写入凭据或研究正文
+checkpoints[LR8T]: F:记录 Research Project 中人工 Checkpoint 的类型、决定、理由与元数据 | R:database://scientia_product/main/projects,code:electron/main.js,code:electron/product-repository.js | A:敏感外传、Charter 变更与审计追踪 | S:project_id 使用 ON DELETE CASCADE，删除 Project 会一并删除审计记录；metadata_json 必须保持机器可解析并不能存放秘密
+conversations[MB8T]: F:按 Research Project 保存 Conversation 的索引字段与完整 session 快照 | R:database://scientia_product/main/projects,code:app/conversation-state.js,code:electron/product-repository.js | A:会话列表、选择和恢复 | S:payload_json 是会话内容真相源，title/时间列只用于索引；project_id 外键未设级联，删除 Project 前必须显式删除该项目的会话
+projects[EB9T]: F:保存 Research Project 身份、Research Workspace 绑定、当前 Research Stage 与 Research Charter 状态 | R:database://scientia_product/main/conversations,database://scientia_product/main/checkpoints,code:electron/product-repository.js | A:Project 生命周期、导航与阶段恢复 | S:workspace_path 可为空仅用于未绑定的引导 Project；绑定后不得静默改换。research_stage_states_json 与 research_charter_json 是版本化契约而非任意文本

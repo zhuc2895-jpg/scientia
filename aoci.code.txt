@@ -1,0 +1,76 @@
+#AOCI-CODE-VOLUME: 1
+
+===/<repository>/===
+.gitattributes[FV3T]: F:声明仓库文本文件的 LF 归一化规则 | R:- | A:所有 Git 跟踪文本文件 | S:移除后 Windows 检出可能产生 CRLF 漂移并干扰 AOCI 行尾校验
+.gitignore[FC4T]: F:排除依赖、运行环境、反向工程资料与机器绑定配置 | R:- | A:Git 提交边界 | S:.codex/config.toml 含机器绝对路径且被 AOCI 追加忽略，不能提交
+AGENTS.md[SG8T]: F:定义 Agent 的 issue tracker、领域文档与 AOCI 使用纪律 | R:code:docs/agents/issue-tracker.md,code:docs/agents/domain.md | A:进入本仓库的 Codex 与其他 Agent | S:AOCI 区块由机器管理，必须按实时 Guide 与机器合同执行，不能手工重建索引流程
+CONTEXT.md[SG8S]: F:定义 SCIENTIA 的领域术语与禁用同义词 | R:code:docs/product-context.md,code:docs/adr/0002-project-owned-research-state.md | A:产品、设计与工程协作 | S:本文件只放 glossary；产品范围和实现决策应写入 docs/product-context.md 或 ADR
+README.md[SG6T]: F:提供产品定位、启动步骤、运行结构与安全边界 | R:code:package.json,code:scripts/setup.ps1,code:electron/main.js,code:science_agent/bridge.py | A:开发者与本地使用者 | S:正式分发前仍需补 Python runtime 打包、应用签名和自动更新
+package.json[FV6T]: F:声明 Electron 应用入口、开发脚本与运行依赖 | R:code:electron/main.js,code:scripts/test.mjs,code:scripts/setup.ps1,code:README.md | A:本地开发与启动 | S:应用要求 Node.js 22+；test 覆盖应用状态、Python 单测与 Harness profile，doctor 只做诊断不改业务状态
+
+===/<repository>/app/===
+app.js[AU9L]: F:编排 Project、Research Stage、Charter、会话、Source Library、Active Source Set、运行与产出的 renderer 交互 | R:code:app/index.html,code:app/styles.css,code:app/research-charter.js,code:app/research-stages.js,code:app/conversation-state.js,code:app/source-library.js,code:electron/preload.cjs | A:Electron renderer 用户界面与来源交互 | S:renderer 不直接访问数据库或文件，所有持久化和运行必须经 preload IPC；离开页面用同步 flush 防止未落盘会话丢失；Charter 待重新批准时后续已完成阶段必须显示为暂停且不可重开；Active Source Set 变更必须保存到当前 Conversation 并只接受当前 Project 的 Source Record
+conversation-state.js[DR7S]: F:规范化会话快照并恢复、校正中断的 Research Run | R:code:app/app.js,code:electron/product-repository.js,code:electron/run-recovery.js | A:renderer 与主进程共享的会话状态契约 | S:重启后 running 只能转为 needs-review；只有匹配会话与运行的终止 Manifest 才能结算消息并恢复产出
+index.html[EU8L]: F:定义 Research Project 工作台、Source Library、Active Source Set 控件、对话框与无障碍结构 | R:code:app/app.js,code:app/styles.css | A:Electron renderer | S:CSP 将 connect-src 设为 none，renderer 不能直接联网，外部打开必须经主进程；来源登记入口必须区分文件导入与 DOI/URL 登记
+research-charter.js[DB8S]: F:维护 Research Charter 字段、版本、批准与重审状态 | R:code:app/app.js,code:electron/product-repository.js,code:app/research-stages.js | A:Scoping Gate 与 Research Run 策略 | S:批准必须由用户触发且只能发生在 Scoping；编辑已批准 Charter 后必须回到 Scoping 重新批准；判断是否产生修订时比较规范化字段，不得因版本或来源元数据不同而误报内容变化
+research-run-policy.js[DS7T]: F:裁定 Research Run 是否允许外部模型与检索传输 | R:code:app/research-charter.js,code:electron/main.js | A:Research Run 启动边界 | S:应取当前与已批准 Charter 中更严格的数据政策；local-only 直接拒绝，sensitive 必须显式确认
+research-stages.js[DW8M]: F:实现迭代 Research Stage 图、锁定、完成、不适用与重开规则 | R:code:app/app.js,code:electron/product-repository.js,code:app/research-charter.js | A:Project 阶段状态与 Stage Gate | S:Scoping 只能由批准 Charter 完成；当前阶段为 Scoping 时后续已完成阶段不得重开，必须先重新批准 Charter；只有 Evidence、Inquiry、Synthesis 可重开，后续阶段必须先处理缺失前置阶段
+styles.css[CU6L]: F:定义工作台布局、主题、Source Library、Active Source Set 状态与响应式视觉语言 | R:code:app/index.html,code:app/app.js | A:Electron renderer 视觉呈现 | S:文件包含多层主题覆盖，后置规则会覆盖前文；新增来源样式应追加在对应主题层并验证亮暗及窄屏
+source-library.js[DB8M]: F:解析与规范化 PDF、Markdown、TeX、BibTeX、RIS、DOI、URL 的来源身份并检测重复 | R:code:electron/source-ingestion.js,code:electron/product-repository.js | A:Project Source Library 领域逻辑 | S:标题、作者与年份提取是尽力而为的元数据推断，不能视为已验证正文或引用；重复检测优先稳定标识，其次规范化标题与年份
+
+===/<repository>/docs/adr/===
+0001-local-first-single-user.md[SG7T]: F:记录本地优先、单用户产品边界 | R:code:docs/product-context.md,code:electron/main.js | A:后续产品与架构决策 | S:跨设备同步、账号、团队和托管云执行不在首版范围内，扩展前需新增或替代 ADR
+0002-project-owned-research-state.md[SG7T]: F:记录 Research Project 1:1 Workspace 与 1:N Conversation 的所有权 | R:code:docs/adr/0008-sqlite-metadata-filesystem-content.md,code:electron/product-repository.js | A:数据模型与文件边界 | S:Project 与 Research Workspace 创建后不可静默改绑，避免会话复用错误目录
+0003-single-visible-agent-durable-run.md[SG7T]: F:记录单可见 Science Agent、内部受控任务与单活跃 Run | R:code:docs/adr/0010-minimum-audit-set.md,code:electron/app-lifecycle.js | A:Agent 身份与运行生命周期 | S:内部任务不得人格化或承担责任；恢复时不得自动重放有副作用的操作
+0004-auditable-paper-package.md[SG7T]: F:记录 Paper Package 的可审计引用门槛 | R:code:docs/adr/0009-immutable-artifacts-append-only-evidence.md,code:science_agent/research_runtime.py | A:证据核验与正式交付 | S:未核验来源不能作为正式证据；网页摘要不能替代全文定位，用户覆盖必须留痕
+0005-provider-portable-deepseek-first.md[SG7T]: F:记录 DeepSeek-first 与 provider seam 策略 | R:code:science_agent/bridge.py,code:electron/main.js | A:模型接入与业务边界 | S:业务层只能依赖能力接口；Run Manifest 必须记录实际模型路由
+0006-iterative-research-stage-graph.md[SG7T]: F:记录迭代 Research Stage 图与关键冻结点 | R:code:app/research-stages.js,code:docs/product-context.md | A:研究工作流与 Gate 设计 | S:Evidence、Inquiry、Synthesis 可以回退，Manuscript 与 Release 需要明确冻结
+0007-project-data-processing-policy.md[SG7T]: F:记录 Project 级外部数据处理政策 | R:code:app/research-run-policy.js,code:electron/main.js | A:隐私边界与运行准入 | S:local-only 在首版禁用外部模型和检索；sensitive 每次外传前必须确认
+0008-sqlite-metadata-filesystem-content.md[SG8T]: F:记录 SQLite 元数据与文件系统内容的分工 | R:code:electron/product-repository.js,code:science_agent/research_runtime.py | A:持久化与恢复架构 | S:数据库只存索引和产品状态，论文、PDF、图表、日志以 Workspace 文件为内容真相源
+0009-immutable-artifacts-append-only-evidence.md[SG8T]: F:记录不可变 Artifact Version 与追加式证据纠错 | R:code:app/conversation-state.js,code:science_agent/research_runtime.py | A:产物版本与证据历史 | S:不得原地覆盖历史产物或删除证据；更正用 supersedes，撤回用 retracts
+0010-minimum-audit-set.md[SG8T]: F:记录最小审计集与不保存隐藏推理链的边界 | R:code:science_agent/bridge.py,code:electron/product-repository.js | A:审计、隐私与复现 | S:审计需保留提示版本、工具摘要、模型路由、哈希与决策，但不保存隐藏思维过程
+
+===/<repository>/docs/agents/===
+domain.md[SG7T]: F:规定 Agent 探索代码前读取 CONTEXT 与 ADR 的顺序 | R:code:CONTEXT.md,code:docs/adr/0001-local-first-single-user.md | A:工程 Agent 的领域建模行为 | S:术语必须沿用 glossary，若与 ADR 冲突必须显式提出
+issue-tracker.md[SG6T]: F:规定使用 GitHub Issues 与 gh CLI 的项目协作方式 | R:code:AGENTS.md,code:docs/agents/triage-labels.md | A:缺陷、规格与任务流转 | S:PR 不是默认需求入口；Wayfinder 使用 GitHub 原生阻塞依赖与子 issue
+triage-labels.md[SG4T]: F:映射 skills 的五类 triage 角色到仓库标签 | R:code:docs/agents/issue-tracker.md,code:AGENTS.md | A:Issue 分诊与 Agent 领取 | S:skills 提到角色时必须使用本文件映射后的真实标签字符串
+
+===/<repository>/docs/===
+product-context.md[SG8T]: F:记录已确认的产品范围、阶段流程、证据与数据策略 | R:code:CONTEXT.md,code:docs/adr/0006-iterative-research-stage-graph.md,code:README.md | A:产品决策与后续规格 | S:本文件承载产品决策而非 glossary；改动关键约束时必须同步评估相关 ADR
+
+===/<repository>/electron/===
+app-lifecycle.js[AR8T]: F:控制窗口关闭隐藏、显式退出与 runtime 停止顺序 | R:code:electron/main.js,code:electron/runtime.js | A:Electron 桌面生命周期 | S:关闭窗口只隐藏；before-quit 必须阻止退出直到 stopRuntime 完成后才能再次 quit
+config-store.js[PC7T]: F:提供串行、原子且可恢复的 JSON 配置读写 | R:code:electron/main.js,code:electron/research-project-lifecycle.js | A:主进程配置消费者 | S:写入先落临时文件再 rename 并重试 Windows 文件占用；只有 updateOrReset 可重建损坏配置
+import-authorizer.js[MS8T]: F:将用户选择的文件路径转换为一次性短期导入令牌 | R:code:electron/main.js,code:electron/workspace-paths.js | A:renderer 到文件导入的授权边界 | S:单次最多 20 个绝对路径，令牌只能消费一次且默认 5 分钟过期，防止 renderer 任意指定路径
+main.js[EG9L]: F:编排 Electron 窗口、托盘、IPC、Project、Workspace、Source Library、安全密钥与 Research Run | R:code:electron/runtime.js,code:electron/product-repository.js,code:electron/research-project-lifecycle.js,code:electron/source-ingestion.js,code:electron/app-lifecycle.js,code:electron/preload.cjs,code:app/research-run-policy.js,code:app/research-charter.js | A:桌面应用主进程 | S:所有文件、配置、数据库和密钥访问都留在主进程；运行前校验 Project 与对话归属、Charter、数据政策和活跃 Run；来源文件先解析再复制，登记失败或重复时清理未登记副本；Source Library 与 Active Source Set 只从当前 Project 提供给 runtime
+native-secret-input.js[IS8T]: F:通过原生 Windows 对话框在主进程采集 API Key | R:code:electron/main.js | A:敏感凭据输入 | S:仅支持 win32 且 PowerShell 必须以 STA 运行；密钥只经 stdout 返回主进程，不进入 renderer
+path-boundary.js[CS8T]: F:提供大小写感知的路径归一化与目录包含判断 | R:code:electron/project-workspace.js,code:electron/research-project-lifecycle.js,code:electron/workspace-paths.js | A:主进程文件系统边界 | S:Windows 比较必须忽略大小写，避免同一路径因盘符或大小写绕过围栏
+preload.cjs[EG8T]: F:通过 contextBridge 暴露窄化的产品、项目、来源、文件与运行 IPC API | R:code:electron/main.js,code:app/app.js,code:app/index.html | A:Electron renderer | S:不得向 renderer 暴露 Node、文件系统或任意 IPC；拖拽文件只能先换取一次性授权令牌；Source 文件选择与 DOI/URL 登记只能调用主进程定义的来源接口
+product-repository.js[PD9L]: F:持久化 Project、Conversation、Source Record、Active Source Set、Charter、Stage、Checkpoint 与当前选择 | R:code:app/conversation-state.js,code:app/research-charter.js,code:app/research-stages.js,code:app/source-library.js,code:electron/main.js,code:electron/path-boundary.js | A:主进程产品状态与迁移 | S:SQLite 必须启用 WAL 与外键；Conversation、Source Record 与 Active Source Set 始终按 Project 隔离；Source 新增后若已越过 Evidence 必须返回 Evidence 重新冻结；旧会话迁移只执行一次并在冲突时回滚
+project-workspace.js[AR8T]: F:安全删除 Research Project 的受管理 Research Workspace | R:code:electron/path-boundary.js,code:electron/main.js,code:electron/research-project-lifecycle.js | A:Project Delete 清理边界 | S:只删除 workspaceKind=managed 且真实路径位于受管理根内的目录；导入目录永不删除，并拒绝删除仍包含其他受保护 Workspace 的父目录
+research-project-lifecycle.js[AB8S]: F:编排 Research Project 创建、激活、归档、恢复、删除与配置同步 | R:code:electron/product-repository.js,code:electron/config-store.js,code:electron/main.js,code:electron/path-boundary.js | A:Project 生命周期服务 | S:Research Project 与 Research Workspace 创建后不可换绑；配置同步失败只报告，不得破坏已经提交的 Project 状态
+run-recovery.js[AR8T]: F:从 Research Workspace 读取并校验 Run Manifest | R:code:electron/main.js,code:app/conversation-state.js,code:science_agent/research_runtime.py | A:Research Run 中断恢复 | S:conversationId 与 runId 只接受安全标识符，Manifest 内身份必须与请求完全一致，防止路径穿越和错恢复
+runtime.js[AR8M]: F:管理本地 daemon 生命周期、Research Run 分发、取消与来源上下文传输 | R:code:electron/main.js,code:science_agent/daemon.py,code:science_agent/bridge.py,code:science_agent/harness.patch.yml | A:Electron 到 Python Harness 的运行边界 | S:同一时间只允许一个活跃 Run；45 分钟强制停止；daemon 异常重启采用退避；Project Source Library 与 Active Source Set 必须随请求传给 bridge，收到终止事件后清理对应 sender 与计时器
+workspace-paths.js[CS8T]: F:将 Workspace 相对路径解析为真实可访问文件 | R:code:electron/main.js,code:electron/path-boundary.js | A:打开、定位与文件检查 | S:必须同时校验词法路径和 realpath，防止符号链接逃逸当前 Research Workspace
+source-ingestion.js[IB8M]: F:将来源文件、DOI 与 URL 转换为带本地定位、获取时间和原始内容哈希的 Source Record 候选 | R:code:app/source-library.js,code:electron/main.js | A:Project Source Library 导入适配层 | S:文件必须先解析成功再写入 Workspace 副本；数据库登记失败或判定重复时不得保留未登记副本；DOI/URL 的原始内容哈希绑定用户输入，不代表已抓取远端正文
+
+===/<repository>/science_agent/===
+__init__.py[CZ2T]: F:标识 SCIENTIA 的 Python Science Agent 包 | R:code:science_agent/bridge.py,code:science_agent/daemon.py | A:Python 包导入 | S:-
+bridge.py[IA9M]: F:把 Research Run 请求、Project Source Library 与 Active Source Set 转换为受约束的 DeepSeek Harness 调用和研究记录 | R:code:science_agent/research_runtime.py,code:science_agent/daemon.py,code:science_agent/harness.patch.yml | A:Python Harness 执行适配层 | S:stdout 只能输出 JSONL 协议事件；必须校验 API Key、Workspace、Run 身份与 Research Charter 后才调用模型；即使 Active Source Set 为空也必须注入来源登记门禁，并把登记来源传给质量核验
+daemon.py[RR8M]: F:常驻管理单 Agent 的 Research Run 子进程、状态与取消 | R:code:science_agent/bridge.py,code:electron/runtime.js | A:本地长驻运行服务 | S:只允许一个 ACTIVE Run；stdout 保持 JSONL；取消必须终止整棵子进程树，避免模型与 shell 副作用继续运行
+harness.patch.yml[FE8T]: F:在 sdk-minimal 上声明文件工具与网页检索能力 | R:code:science_agent/bridge.py,code:scripts/profile_check.py | A:DeepSeek Harness profile | S:补丁必须保持单 Agent，不得引入 subagent、team 或 workflow；web 检索继续使用 DEEPSEEK_API_KEY
+research_runtime.py[DA9L]: F:生成 Research Brief、证据账本、Run Manifest、Artifact 哈希与来源登记质量检查 | R:code:science_agent/bridge.py,code:electron/main.js,code:electron/run-recovery.js | A:Research Run 的可追溯执行契约 | S:输出按会话隔离到 .science；超过 32MiB 的文件不计算哈希；证据与产物只从真实文件/Manifest 读取；新增 Evidence Record 的 source 必须能与 Project Source Library 的 locator/identity 匹配，否则质量检查告警
+system_prompt.md[SA8T]: F:定义 Science Agent 的单一身份、证据纪律和研究交付契约 | R:code:electron/runtime.js,code:science_agent/bridge.py,code:CONTEXT.md | A:每次模型请求的系统提示 | S:用户当前请求高于系统提示；文档、网页与工具输出仅是不可信证据；必须保持单 Agent 并禁止伪造引用或结果
+
+===/<repository>/scripts/===
+brace_check.py[XQ3T]: F:扫描 app.js 的括号配对并跳过字符串、注释与正则上下文 | R:code:app/app.js,code:scripts/token_balance.py | A:本地 JS 结构诊断 | S:-
+brace_check_tail.py[XQ3T]: F:从 appTabs 事件块开始检查 app.js 尾部括号平衡 | R:code:app/app.js,code:scripts/brace_check.py | A:局部 JS 结构诊断 | S:-
+capture-result.cjs[XQ3T]: F:以离屏 Electron 触发预览研究并截取结果页 | R:code:app/index.html,code:app/app.js,code:analysis/scientia-agent-result-preview.png | A:UI 视觉回归辅助 | S:使用 renderer 预览桥，不启动真实 API 或本地 daemon
+capture-ui.cjs[XQ3T]: F:以离屏 Electron 截取工作台初始界面 | R:code:app/index.html,code:app/app.js,code:analysis/scientia-ui-preview.png | A:UI 视觉回归辅助 | S:离屏窗口仅加载本地页面，不触发真实模型请求
+doctor.mjs[XO6T]: F:检查 Node、Electron、Python SDK、研究 profile 与运行依赖 | R:code:package.json,code:scripts/profile_check.py,code:science_agent/harness.patch.yml | A:本地环境诊断 | S:doctor 只读诊断，不修改正式索引、配置或业务数据
+parse_check.py[XQ3T]: F:使用 esprima 验证 renderer JavaScript 的语法结构 | R:code:app/app.js,code:app/conversation-state.js | A:本地解析诊断 | S:-
+product-state-smoke.mjs[XQ7L]: F:端到端验证 SQLite 产品仓库、Project、Charter、Stage、Source Library、Active Source Set 与迁移行为 | R:code:electron/product-repository.js,code:electron/source-ingestion.js,code:app/research-charter.js,code:app/research-stages.js,code:electron/research-project-lifecycle.js | A:产品状态回归测试 | S:必须使用临时数据库和临时 Workspace，不能污染真实 userData 或用户研究目录；必须覆盖跨 Project 来源访问拒绝
+profile_check.py[XQ5T]: F:无模型请求地启动并验证研究 Harness profile | R:code:science_agent/harness.patch.yml,code:science_agent/bridge.py | A:Harness 集成自检 | S:使用临时 DSH home 与占位 API Key，只验证启动和插件装配，不调用外部模型
+setup.ps1[XV6T]: F:创建本地 Python venv 并安装 DeepSeek Harness SDK | R:code:package.json,code:README.md | A:Windows 开发环境准备 | S:只在仓库内创建 .venv；缺少 Python 3.10+ 时直接失败，不回退到全局安装
+test.mjs[XQ7T]: F:统一执行 JS 语法、Source Library 与产品状态测试、Python 编译与单测、Harness profile 自检 | R:code:package.json,code:scripts/profile_check.py,code:electron/tests/source-library.test.mjs,code:electron/tests/source-ingestion.test.mjs | A:本地验收入口 | S:任一子检查失败必须非零退出；不得在测试中写入真实用户数据
+token_balance.py[XQ3T]: F:用 esprima token 流检查 app.js 的括号平衡 | R:code:app/app.js,code:scripts/brace_check.py | A:本地 JS 解析诊断 | S:-
