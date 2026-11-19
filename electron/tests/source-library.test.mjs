@@ -80,6 +80,7 @@ ER  -
   assert.equal(records[0].year, 2023);
   assert.equal(records[0].venue, 'Journal of Reproducibility');
   assert.equal(records[0].doi, '10.1000/trial');
+  assert.deepEqual(records[0].metadata, { entryType: 'JOUR' });
 });
 
 test('Markdown and TeX sources derive title and year metadata', () => {

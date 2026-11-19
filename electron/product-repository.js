@@ -948,6 +948,22 @@ export function openProductRepository({ databasePath }) {
         inserted.push(stored);
         existing.push(stored);
       }
+      if (inserted.length) {
+        const stageState = researchStageStateForRow(project);
+        if (
+          ['inquiry', 'synthesis', 'manuscript', 'release'].includes(stageState.currentStageKey)
+          && stageState.stages.evidence?.status === 'completed'
+        ) {
+          const reopenedAt = new Date().toISOString();
+          const reopened = reopenResearchStage(stageState, 'evidence', { reopenedAt });
+          updateResearchStageState.run(
+            reopened.currentStageKey || '',
+            JSON.stringify(reopened.stages),
+            reopenedAt,
+            project.id,
+          );
+        }
+      }
       database.exec('COMMIT');
     } catch (error) {
       database.exec('ROLLBACK');

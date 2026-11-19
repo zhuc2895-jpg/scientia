@@ -389,21 +389,33 @@ async function importFiles(workspaceInput, tokens) {
   return imported;
 }
 
-async function cleanupUnregisteredSourceFiles(workspacePath, duplicates, inserted) {
-  const retained = new Set(inserted.map((source) => source.localLocator.split('#')[0]));
-  const candidates = new Set(duplicates
-    .map((duplicate) => duplicate.incoming?.localLocator?.split('#')[0])
-    .filter((locator) => typeof locator === 'string' && locator.startsWith('.science/sources/') && !retained.has(locator)));
-  for (const locator of candidates) {
-    const absolute = path.resolve(workspacePath, locator);
-    if (!isWithin(path.resolve(workspacePath), absolute)) continue;
+async function removeSourceCopies(workspacePath, locators) {
+  const root = path.resolve(workspacePath);
+  for (const locator of new Set(locators)) {
+    if (typeof locator !== 'string' || !locator.startsWith('.science/sources/')) continue;
+    const absolute = path.resolve(root, locator.split('#')[0]);
+    if (!isWithin(root, absolute)) continue;
     await fs.rm(absolute, { force: true });
   }
 }
 
+async function removeDuplicateSourceCopies(workspacePath, duplicates, inserted) {
+  const retained = new Set(inserted.map((source) => source.localLocator.split('#')[0]));
+  const candidates = duplicates
+    .map((duplicate) => duplicate.incoming?.localLocator)
+    .filter((locator) => !retained.has(locator?.split('#')[0]));
+  await removeSourceCopies(workspacePath, candidates);
+}
+
 async function registerImportedSources(workspacePath, sources) {
-  const result = productRepository.registerSources({ sources });
-  await cleanupUnregisteredSourceFiles(workspacePath, result.duplicates, result.inserted);
+  let result;
+  try {
+    result = productRepository.registerSources({ sources });
+  } catch (error) {
+    await removeSourceCopies(workspacePath, sources.map((source) => source.localLocator));
+    throw error;
+  }
+  await removeDuplicateSourceCopies(workspacePath, result.duplicates, result.inserted);
   return {
     productState: productRepository.loadState(),
     imported: result.inserted,
@@ -556,6 +568,20 @@ async function runAgent(payload, sender) {
   }
   const approvedCharter = policyDecision.approvedCharter || null;
   const activeSources = productRepository.getConversationActiveSources(payload?.conversationId);
+  const projectSources = state.sources.map((source) => ({
+    id: source.id,
+    kind: source.kind,
+    title: source.title,
+    authors: source.authors,
+    year: source.year,
+    doi: source.doi,
+    url: source.url,
+    venue: source.venue,
+    stableIdentifier: source.stableIdentifier,
+    localLocator: source.localLocator,
+    contentHash: source.contentHash,
+    acquiredAt: source.acquiredAt,
+  }));
   const enrichedPayload = {
     ...payload,
     projectId: state.activeProjectId,
@@ -563,6 +589,7 @@ async function runAgent(payload, sender) {
     researchCharter: approvedCharter,
     charterDraftMode: stageKey === 'scoping' && !approvedCharter,
     activeSources,
+    projectSources,
   };
   return runtimeManager.run(enrichedPayload, sender, researchWorkspace);
 }

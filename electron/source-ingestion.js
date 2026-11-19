@@ -76,15 +76,14 @@ export async function ingestSourceFiles({
     const bytes = await fs.readFile(filePath);
     const fileHash = sha256(bytes);
     const sourceName = path.basename(filePath);
+    const parsed = parseFileContent(kind, bytes, sourceName);
+    if (!parsed.length) throw new Error(`无法从 ${sourceName} 读取任何来源条目。`);
     const id = String(idFactory());
     const destination = path.join(sourceDirectory, `${safeSegment(id)}-${safeSegment(sourceName)}`);
     await fs.copyFile(filePath, destination);
     const locator = relativeLocator(workspacePath, destination);
-    const parsed = parseFileContent(kind, bytes, sourceName);
-    if (!parsed.length) throw new Error(`无法从 ${sourceName} 读取任何来源条目。`);
 
     parsed.forEach((entry, index) => {
-      const entryRaw = entry.raw ? Buffer.from(entry.raw, 'utf8') : bytes;
       const stableIdentifier = entry.stableIdentifier || null;
       records.push({
         id: parsed.length > 1 ? String(idFactory()) : id,
@@ -97,12 +96,13 @@ export async function ingestSourceFiles({
         venue: entry.venue || '',
         stableIdentifier,
         localLocator: parsed.length > 1 ? `${locator}#entry-${index + 1}` : locator,
-        contentHash: parsed.length > 1 ? sha256(entryRaw) : fileHash,
+        contentHash: fileHash,
         acquiredAt,
         metadata: {
           ...(entry.metadata || {}),
           sourceName,
           fileHash,
+          contentHashBasis: 'original-file',
           importedFormat: kind,
         },
       });
@@ -128,6 +128,8 @@ export async function ingestReference({
   const normalizedTitle = String(title || '').replace(/\s+/g, ' ').trim()
     || (classified.kind === 'doi' ? `DOI ${classified.value}` : classified.value);
   const normalizedYear = normalizeSourceYear(year);
+  const originalReference = String(reference).trim();
+  const contentHash = sha256(Buffer.from(originalReference, 'utf8'));
   const payload = {
     id,
     kind: classified.kind,
@@ -135,13 +137,15 @@ export async function ingestReference({
     title: normalizedTitle,
     year: normalizedYear,
     acquiredAt,
+    contentHash,
+    contentHashBasis: 'imported-reference',
   };
   const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  const localFileHash = sha256(bytes);
   const directory = path.join(workspacePath, '.science', 'sources');
   const destination = path.join(directory, `${safeSegment(id)}-reference.json`);
   await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(destination, bytes);
-  const contentHash = sha256(bytes);
   return {
     id,
     kind: classified.kind,
@@ -155,6 +159,11 @@ export async function ingestReference({
     localLocator: relativeLocator(workspacePath, destination),
     contentHash,
     acquiredAt,
-    metadata: { reference: classified.value, sourceName: path.basename(destination), fileHash: contentHash },
+    metadata: {
+      reference: classified.value,
+      sourceName: path.basename(destination),
+      fileHash: localFileHash,
+      contentHashBasis: 'imported-reference',
+    },
   };
 }

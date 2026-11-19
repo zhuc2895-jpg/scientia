@@ -204,7 +204,7 @@ export function parseRis(text) {
       url,
       venue: cleanBraces((current.JO || current.JF || current.T2 || current.BT || [''])[0]),
       stableIdentifier: doi ? `doi:${doi}` : url ? `url:${url}` : null,
-      metadata: { entryType: (current.TY || [''])[0], tags: current, raw: current._raw.join('\n') },
+      metadata: { entryType: (current.TY || [''])[0] },
       raw: current._raw.join('\n'),
     });
     current = null;

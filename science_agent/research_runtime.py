@@ -475,7 +475,48 @@ def _new_artifacts(output_dir: Path, workspace: Path, started_at: str) -> list[d
     return artifacts
 
 
-def assess_result(result_text: str, prompt: str, artifacts: list[dict[str, Any]], evidence_added: int) -> dict[str, Any]:
+def _source_reference_tokens(value: Any) -> set[str]:
+    if not isinstance(value, str) or not value.strip():
+        return set()
+    cleaned = value.strip().strip("'\"`").replace("\\", "/").lower()
+    cleaned = cleaned.split("#", 1)[0].rstrip("/")
+    tokens = {cleaned}
+    basename = cleaned.rsplit("/", 1)[-1]
+    if basename:
+        tokens.add(basename)
+    return {token for token in tokens if token}
+
+
+def _unregistered_evidence_sources(
+    entries: list[dict[str, Any]],
+    registered_sources: list[dict[str, Any]],
+) -> list[str]:
+    registered_tokens: set[str] = set()
+    for source in registered_sources:
+        if not isinstance(source, dict):
+            continue
+        for key in ("localLocator", "stableIdentifier", "doi", "url", "title"):
+            registered_tokens.update(_source_reference_tokens(source.get(key)))
+    unresolved: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        source = entry.get("source")
+        tokens = _source_reference_tokens(source)
+        if tokens and tokens.isdisjoint(registered_tokens):
+            unresolved.append(str(source))
+    return unresolved
+
+
+def assess_result(
+    result_text: str,
+    prompt: str,
+    artifacts: list[dict[str, Any]],
+    evidence_added: int,
+    *,
+    new_evidence_entries: list[dict[str, Any]] | None = None,
+    registered_sources: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     text = result_text or ""
     citation_count = len(re.findall(
         r"https?://|doi:\s*10\.\d{4,9}/\S+|\[[0-9]+(?:[,–-][0-9]+)*\]|`[^`]+\.(?:pdf|md|csv|py|ipynb)",
@@ -512,6 +553,19 @@ def assess_result(result_text: str, prompt: str, artifacts: list[dict[str, Any]]
             ),
         },
     ]
+    unregistered_sources: list[str] = []
+    if new_evidence_entries is not None and registered_sources is not None:
+        unregistered_sources = _unregistered_evidence_sources(new_evidence_entries, registered_sources)
+        checks.append({
+            "id": "source-registration",
+            "status": "warn" if unregistered_sources else "pass",
+            "label": "来源登记",
+            "detail": (
+                f"{len(unregistered_sources)} 条新增证据引用了未登记来源。"
+                if unregistered_sources
+                else "新增证据均引用 Project Source Library 中已登记的来源。"
+            ),
+        })
     warnings = sum(1 for check in checks if check["status"] == "warn")
     return {
         "checks": checks,
@@ -519,6 +573,7 @@ def assess_result(result_text: str, prompt: str, artifacts: list[dict[str, Any]]
         "citationCount": citation_count,
         "artifactCount": len(artifacts),
         "evidenceAdded": evidence_added,
+        "unregisteredEvidenceSources": unregistered_sources,
     }
 
 
@@ -533,6 +588,7 @@ def finalize_research_run(
     usage: dict[str, Any] | None = None,
     status: str = "completed",
     error: str = "",
+    registered_sources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workspace = workspace.resolve()
     output_dir = workspace / run_context["outputDir"]
@@ -547,7 +603,15 @@ def finalize_research_run(
     evidence_after = _read_evidence(evidence_path)
     evidence_added = max(0, len(evidence_after) - int(run_context.get("evidenceBefore") or 0))
     artifacts = _new_artifacts(output_dir, workspace, run_context["startedAt"])
-    quality = assess_result(result_text, prompt, artifacts, evidence_added)
+    new_evidence_entries = evidence_after[int(run_context.get("evidenceBefore") or 0):]
+    quality = assess_result(
+        result_text,
+        prompt,
+        artifacts,
+        evidence_added,
+        new_evidence_entries=new_evidence_entries,
+        registered_sources=registered_sources,
+    )
 
     finished_at = utc_now()
     manifest.update({

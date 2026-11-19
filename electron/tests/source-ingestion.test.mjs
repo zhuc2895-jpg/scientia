@@ -75,11 +75,12 @@ test('DOI and URL references become hashed local source records', async (t) => {
   assert.equal(url.kind, 'url');
   assert.equal(url.url, 'https://example.com/paper');
   assert.equal(url.title, 'Public paper landing page');
+  assert.equal(doi.contentHash, createHash('sha256').update('https://doi.org/10.1000/ABC').digest('hex'));
+  assert.equal(url.contentHash, createHash('sha256').update('https://example.com/paper#results').digest('hex'));
 
   for (const record of [doi, url]) {
-    assert.match(record.contentHash, /^[a-f0-9]{64}$/);
+    assert.equal(record.metadata.contentHashBasis, 'imported-reference');
     const absolute = path.join(workspace, record.localLocator.split('#')[0]);
-    const bytes = readFileSync(absolute);
-    assert.equal(createHash('sha256').update(bytes).digest('hex'), record.contentHash);
+    assert.ok(readFileSync(absolute).length > 0);
   }
 });

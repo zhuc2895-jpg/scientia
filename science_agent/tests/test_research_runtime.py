@@ -173,5 +173,31 @@ class ResearchRuntimeTests(unittest.TestCase):
             self.assertEqual(extracted["question"], "Q")
             self.assertEqual(extracted["citationStyle"], "APA 7")
 
+    def test_assess_result_checks_evidence_against_registered_sources(self) -> None:
+        registered = [{"localLocator": ".science/sources/paper.md"}]
+        registered_quality = assess_result(
+            "Observed in [1]. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=registered,
+        )
+        source_check = next(check for check in registered_quality["checks"] if check["id"] == "source-registration")
+        self.assertEqual(source_check["status"], "pass")
+
+        unregistered_quality = assess_result(
+            "Observed in [1]. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "unregistered-web-page"}],
+            registered_sources=registered,
+        )
+        source_check = next(check for check in unregistered_quality["checks"] if check["id"] == "source-registration")
+        self.assertEqual(source_check["status"], "warn")
+        self.assertEqual(unregistered_quality["unregisteredEvidenceSources"], ["unregistered-web-page"])
+
+
 if __name__ == "__main__":
     unittest.main()

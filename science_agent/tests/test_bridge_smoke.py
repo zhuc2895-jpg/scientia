@@ -46,6 +46,10 @@ class BridgeSmokeTests(unittest.TestCase):
                         return False
 
                     def run(self, prompt, session_id=None, on_notification=None):
+                        if "Application source registration gate" not in prompt:
+                            raise RuntimeError("source registration gate missing from prompt")
+                        if "Project Source Library contains 1 registered Source Record(s)" not in prompt:
+                            raise RuntimeError("registered source count missing from prompt")
                         if "Application-selected Active Source Set" not in prompt:
                             raise RuntimeError("active source set missing from prompt")
                         if ".science/sources/source.md" not in prompt:
@@ -78,6 +82,12 @@ class BridgeSmokeTests(unittest.TestCase):
                 "mode": "literature",
                 "stageKey": "evidence",
                 "activeSources": [{
+                    "title": "Registered source",
+                    "year": 2026,
+                    "stableIdentifier": "doi:10.1000/smoke",
+                    "localLocator": ".science/sources/source.md",
+                }],
+                "projectSources": [{
                     "title": "Registered source",
                     "year": 2026,
                     "stableIdentifier": "doi:10.1000/smoke",
@@ -158,6 +168,10 @@ class BridgeSmokeTests(unittest.TestCase):
                         return False
 
                     def run(self, prompt, session_id=None, on_notification=None):
+                        if "Application source registration gate" not in prompt:
+                            raise RuntimeError("source registration gate missing for empty active set")
+                        if "Active Source Set for this Conversation is empty" not in prompt:
+                            raise RuntimeError("empty active source set rule missing")
                         output_dir = next((self.cwd / ".science" / "outputs").iterdir())
                         (output_dir / "research-charter.json").write_text(json.dumps({
                             "question": "How does the intervention affect the outcome?",

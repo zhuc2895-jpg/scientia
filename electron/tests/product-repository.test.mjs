@@ -1026,3 +1026,22 @@ test('conversation active source sets persist and reject sources from another pr
   assert.equal(repository.getSource('source-1'), null);
   assert.equal(repository.getSource('source-b')?.id, 'source-b');
 });
+
+test('adding a source after Evidence revokes freeze by returning the project to Evidence', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  approveTestCharter(repository);
+  repository.completeResearchStage('evidence');
+  assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'inquiry');
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  const stageGraph = repository.loadState().project.stageGraph;
+  assert.equal(stageGraph.currentStageKey, 'evidence');
+  assert.equal(stageGraph.currentStage.isCompleted, true);
+  assert.deepEqual(stageGraph.nextAction.allowedActions, ['complete']);
+});
