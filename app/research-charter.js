@@ -158,44 +158,8 @@ export function saveResearchCharterDraft(state, value, {
   }
 
   const unchanged = FIELD_KEYS.every((key) => current[key] === fields[key]);
-  if (current.status === 'draft') {
-    const agentTakesOverUserDraft = normalizedOrigin === 'agent' && current.revisionOrigin === 'user';
-    if (unchanged && !agentTakesOverUserDraft) return normalized;
-    if (agentTakesOverUserDraft) {
-      const revision = {
-        ...fields,
-        version: current.version + 1,
-        status: 'draft',
-        revisionOrigin: 'agent',
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        approvedAt: null,
-        approvedBy: null,
-        supersedes: current.version,
-        generatedByRunId: normalizedRunId || current.generatedByRunId || null,
-        contentHash: null,
-      };
-      return {
-        currentVersion: revision.version,
-        approvedVersion: normalized.approvedVersion,
-        revisions: [...normalized.revisions, revision],
-      };
-    }
-    const revision = {
-      ...current,
-      ...fields,
-      revisionOrigin: normalizedOrigin,
-      updatedAt: timestamp,
-      generatedByRunId: normalizedRunId || current.generatedByRunId || null,
-      contentHash: null,
-    };
-    return {
-      ...normalized,
-      revisions: normalized.revisions.map((item) => item.version === current.version ? revision : item),
-    };
-  }
-
-  if (unchanged) return normalized;
+  const agentTakesOverUserDraft = normalizedOrigin === 'agent' && current.revisionOrigin === 'user';
+  if (unchanged && !agentTakesOverUserDraft) return normalized;
   const revision = {
     ...fields,
     version: current.version + 1,
@@ -224,15 +188,19 @@ export function approveResearchCharter(state, { approvedAt = new Date().toISOStr
   const timestamp = normalizeTimestamp(approvedAt) || new Date().toISOString();
   const approved = {
     ...current,
+    version: current.version + 1,
     status: 'approved',
+    createdAt: timestamp,
     updatedAt: timestamp,
     approvedAt: timestamp,
     approvedBy: 'user',
+    supersedes: current.version,
+    contentHash: null,
   };
   return {
-    currentVersion: current.version,
-    approvedVersion: current.version,
-    revisions: normalized.revisions.map((item) => item.version === current.version ? approved : item),
+    currentVersion: approved.version,
+    approvedVersion: approved.version,
+    revisions: [...normalized.revisions, approved],
   };
 }
 

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -100,6 +100,17 @@ export function openProductRepository({ databasePath }) {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS checkpoints (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
   `);
   const conversationColumns = database.prepare('PRAGMA table_info(conversations)').all();
   if (!conversationColumns.some((column) => column.name === 'project_id')) {
@@ -187,6 +198,14 @@ export function openProductRepository({ databasePath }) {
   const setAppState = database.prepare(`
     INSERT INTO app_state (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `);
+  const insertCheckpoint = database.prepare(`
+    INSERT INTO checkpoints (id, project_id, type, decision, rationale, metadata_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const selectCheckpoints = database.prepare(`
+    SELECT id, project_id, type, decision, rationale, metadata_json, created_at
+    FROM checkpoints WHERE project_id = ? ORDER BY created_at DESC, id DESC
   `);
 
   let closed = false;
@@ -482,21 +501,36 @@ export function openProductRepository({ databasePath }) {
       generatedByRunId,
     });
     const nextCurrent = currentResearchCharter(nextCharter);
-    const revisionCreated = previousCurrent?.status === 'approved'
-      && nextCurrent?.version !== previousCurrent.version;
+    const revisionCreated = nextCurrent?.version !== previousCurrent?.version;
+    const persistedCharter = revisionCreated
+      ? setCurrentResearchCharterContentHash(nextCharter, researchCharterContentHash(nextCurrent))
+      : nextCharter;
     const currentStageState = researchStageStateForRow(project, previousCharter);
-    const stageState = revisionCreated
+    const stageState = previousCurrent?.status === 'approved' && revisionCreated
       ? { ...currentStageState, currentStageKey: 'scoping' }
       : currentStageState;
     const timestamp = new Date().toISOString();
     updateResearchProjectState.run(
-      JSON.stringify(nextCharter),
+      JSON.stringify(persistedCharter),
       stageState.currentStageKey || '',
       JSON.stringify(stageState.stages),
       timestamp,
       project.id,
     );
     return loadState();
+  }
+
+  function restoreResearchCharterRevisionRecord({ version } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    const charterState = researchCharterStateForRow(project);
+    const selected = charterState.revisions.find((revision) => revision.version === Number(version));
+    if (!selected) throw new Error('无法恢复不存在的 Research Charter 版本。');
+    return saveResearchCharterDraftRecord({
+      charter: selected,
+      revisionOrigin: 'user',
+      generatedByRunId: selected.generatedByRunId,
+    });
   }
 
   function approveResearchCharterRecord({ charter } = {}) {
@@ -558,6 +592,63 @@ export function openProductRepository({ databasePath }) {
     return mutateResearchStageState((state) => reopenResearchStage(state, stageKey, {
       reopenedAt: new Date().toISOString(),
     }));
+  }
+
+  function serializeCheckpoint(row) {
+    let metadata = {};
+    try {
+      const parsed = JSON.parse(row.metadata_json || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = parsed;
+    } catch {
+      // Corrupt checkpoint metadata remains available through its other fields.
+    }
+    return {
+      id: row.id,
+      projectId: row.project_id,
+      type: row.type,
+      decision: row.decision,
+      rationale: row.rationale,
+      metadata,
+      createdAt: row.created_at,
+    };
+  }
+
+  function recordCheckpointRecord({ type, decision, rationale, metadata = {} } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    const normalizedType = typeof type === 'string' ? type.trim() : '';
+    const normalizedDecision = typeof decision === 'string' ? decision.trim() : '';
+    const normalizedRationale = typeof rationale === 'string' ? rationale.trim() : '';
+    if (!normalizedType || !normalizedDecision || !normalizedRationale) {
+      throw new Error('Checkpoint 类型、决定和理由不能为空。');
+    }
+    const normalizedMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    insertCheckpoint.run(
+      id,
+      project.id,
+      normalizedType,
+      normalizedDecision,
+      normalizedRationale,
+      JSON.stringify(normalizedMetadata),
+      createdAt,
+    );
+    return {
+      id,
+      projectId: project.id,
+      type: normalizedType,
+      decision: normalizedDecision,
+      rationale: normalizedRationale,
+      metadata: normalizedMetadata,
+      createdAt,
+    };
+  }
+
+  function listCheckpointRecords() {
+    assertOpen();
+    const project = assertActiveProject();
+    return selectCheckpoints.all(project.id).map(serializeCheckpoint);
   }
 
   function getConversationProjectId(id) {
@@ -687,7 +778,10 @@ export function openProductRepository({ databasePath }) {
     getProject,
     getActiveResearchWorkspacePath,
     getBoundResearchWorkspacePaths,
+    recordCheckpoint: recordCheckpointRecord,
+    listCheckpoints: listCheckpointRecords,
     saveResearchCharterDraft: saveResearchCharterDraftRecord,
+    restoreResearchCharterRevision: restoreResearchCharterRevisionRecord,
     approveResearchCharter: approveResearchCharterRecord,
     completeResearchStage: completeResearchStageRecord,
     markResearchStageNotApplicable: markResearchStageNotApplicableRecord,

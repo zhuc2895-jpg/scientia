@@ -686,6 +686,9 @@ function renderResearchCharterDialog() {
           <span class="charter-revision-status ${escapeHTML(revision.status)}">${revision.status === 'approved' ? '已批准' : '草稿'}</span>
           <span>${revision.revisionOrigin === 'agent' ? 'Science Agent 起草' : '用户编辑'}</span>
           <time>${escapeHTML(formatTime(revision.updatedAt))}</time>
+          ${revision.version === charter.currentVersion
+            ? '<span class="charter-revision-current">当前</span>'
+            : `<button type="button" class="charter-revision-restore" data-charter-revision="${revision.version}">使用此版本</button>`}
         </div>`).join('')
     : '<div class="charter-revision-empty">批准或保存修订后，这里会保留版本历史。</div>';
   const canApprove = graph?.currentStageKey === 'scoping' && Boolean(charter?.current?.generatedByRunId);
@@ -748,6 +751,20 @@ async function saveResearchCharterDraftFromGate({ closeAfter = false } = {}) {
     els.charterSaveDraft.disabled = false;
     els.charterApprove.disabled = false;
     if (els.charterDialog.open) renderResearchCharterDialog();
+  }
+}
+
+async function restoreResearchCharterRevision(version) {
+  if (stageMutationBusy()) return;
+  try {
+    const productState = await bridge.projectCharterRestoreRevision({ version });
+    applyProductState(productState);
+    fillResearchCharterForm(activeResearchCharterState()?.current || emptyResearchCharter());
+    renderAll();
+    renderResearchCharterDialog();
+    showToast(`Research Charter v${version} 已恢复为新的待批准草稿。`);
+  } catch (error) {
+    showToast(error.message || '无法恢复 Research Charter 版本。', 5000);
   }
 }
 
@@ -1858,6 +1875,10 @@ function bindEvents() {
   els.stageNotApplicableDialog.addEventListener('close', () => { state.pendingStageNotApplicableKey = null; });
 
   els.charterSaveDraft.addEventListener('click', () => void saveResearchCharterDraftFromGate());
+  els.charterRevisionList.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-charter-revision]');
+    if (button) void restoreResearchCharterRevision(Number(button.dataset.charterRevision));
+  });
   els.charterApprove.addEventListener('click', () => void approveResearchCharterFromGate());
   $('#cancel-charter').addEventListener('click', closeResearchCharterDialog);
   $('#cancel-charter-icon').addEventListener('click', closeResearchCharterDialog);
@@ -2261,6 +2282,20 @@ function createPreviewBridge() {
         );
         previewStageStates.set(previewActiveProjectId, { ...currentStage, currentStageKey: 'scoping' });
       }
+      previewCharterStates.set(previewActiveProjectId, next);
+      return previewProductState();
+    },
+    async projectCharterRestoreRevision({ version }) {
+      const previous = normalizeResearchCharterState(
+        previewCharterStates.get(previewActiveProjectId) || createInitialResearchCharterState(),
+      );
+      const selected = previous.revisions.find((revision) => revision.version === Number(version));
+      if (!selected) throw new Error('无法恢复不存在的 Research Charter 版本。');
+      const next = saveResearchCharterDraft(previous, selected, {
+        revisionOrigin: 'user',
+        updatedAt: new Date().toISOString(),
+        generatedByRunId: selected.generatedByRunId,
+      });
       previewCharterStates.set(previewActiveProjectId, next);
       return previewProductState();
     },

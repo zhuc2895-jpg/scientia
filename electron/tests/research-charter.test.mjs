@@ -69,17 +69,18 @@ test('revision authorship uses revisionOrigin and accepts legacy source values',
   assert.equal(currentResearchCharter(state).revisionOrigin, 'user');
 });
 
-test('editing a draft updates it without creating a new version', () => {
+test('editing a draft appends a new immutable version', () => {
   let state = saveResearchCharterDraft(undefined, charter(), { updatedAt: timestamp });
   state = saveResearchCharterDraft(state, charter({ scope: 'Updated scope.' }), {
     updatedAt: '2026-11-19T08:01:00.000Z',
   });
 
-  assert.equal(state.revisions.length, 1);
-  assert.equal(currentResearchCharter(state).version, 1);
+  assert.equal(state.revisions.length, 2);
+  assert.equal(state.revisions[0].version, 1);
+  assert.equal(state.revisions[0].scope, charter().scope);
+  assert.equal(currentResearchCharter(state).version, 2);
   assert.equal(currentResearchCharter(state).scope, 'Updated scope.');
-  assert.equal(currentResearchCharter(state).createdAt, timestamp);
-  assert.equal(currentResearchCharter(state).updatedAt, '2026-11-19T08:01:00.000Z');
+  assert.equal(currentResearchCharter(state).createdAt, '2026-11-19T08:01:00.000Z');
 });
 
 test('approving the current draft records an immutable approved version', () => {
@@ -87,8 +88,11 @@ test('approving the current draft records an immutable approved version', () => 
   state = approveResearchCharter(state, { approvedAt: '2026-11-19T08:02:00.000Z' });
   const approved = currentApprovedResearchCharter(state);
 
+  assert.equal(state.revisions.length, 2);
+  assert.equal(state.revisions[0].status, 'draft');
   assert.equal(currentResearchCharter(state).status, 'approved');
-  assert.equal(approved.version, 1);
+  assert.equal(approved.version, 2);
+  assert.equal(approved.supersedes, 1);
   assert.equal(approved.approvedAt, '2026-11-19T08:02:00.000Z');
   assert.equal(charterNeedsReapproval(state), false);
 });
@@ -101,18 +105,18 @@ test('editing an approved charter creates a re-approval revision and retains his
     updatedAt: '2026-11-19T08:03:00.000Z',
   });
 
-  assert.equal(state.revisions.length, 2);
-  assert.equal(state.revisions[0].status, 'approved');
-  assert.equal(state.revisions[0].question, charter().question);
-  assert.equal(currentResearchCharter(state).version, 2);
+  assert.equal(state.revisions.length, 3);
+  assert.equal(state.revisions[1].status, 'approved');
+  assert.equal(state.revisions[1].question, charter().question);
+  assert.equal(currentResearchCharter(state).version, 3);
   assert.equal(currentResearchCharter(state).status, 'draft');
-  assert.equal(currentResearchCharter(state).supersedes, 1);
+  assert.equal(currentResearchCharter(state).supersedes, 2);
   assert.equal(currentApprovedResearchCharter(state), null);
   assert.equal(charterNeedsReapproval(state), true);
 
   state = approveResearchCharter(state, { approvedAt: '2026-11-19T08:04:00.000Z' });
-  assert.equal(currentApprovedResearchCharter(state).version, 2);
-  assert.equal(state.revisions.length, 2);
+  assert.equal(currentApprovedResearchCharter(state).version, 4);
+  assert.equal(state.revisions.length, 4);
 });
 
 
@@ -133,13 +137,13 @@ test('a later agent draft creates a new revision after a user-edited reapproval 
     generatedByRunId: 'run-draft-2',
   });
 
-  assert.equal(state.revisions.length, 3);
-  assert.equal(state.revisions[1].version, 2);
-  assert.equal(state.revisions[1].status, 'draft');
-  assert.equal(state.revisions[1].question, 'User revised question.');
-  assert.equal(currentResearchCharter(state).version, 3);
+  assert.equal(state.revisions.length, 4);
+  assert.equal(state.revisions[2].version, 3);
+  assert.equal(state.revisions[2].status, 'draft');
+  assert.equal(state.revisions[2].question, 'User revised question.');
+  assert.equal(currentResearchCharter(state).version, 4);
   assert.equal(currentResearchCharter(state).status, 'draft');
-  assert.equal(currentResearchCharter(state).supersedes, 2);
+  assert.equal(currentResearchCharter(state).supersedes, 3);
   assert.equal(currentResearchCharter(state).question, 'Agent revised question.');
   assert.equal(currentResearchCharter(state).generatedByRunId, 'run-draft-2');
 });

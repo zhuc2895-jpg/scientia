@@ -20,6 +20,7 @@ import { pathKey } from './path-boundary.js';
 import { createConfigStore } from './config-store.js';
 import { createResearchProjectLifecycle } from './research-project-lifecycle.js';
 import { researchCharterContentString } from '../app/research-charter.js';
+import { evaluateResearchRunPolicy } from '../app/research-run-policy.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -387,7 +388,7 @@ async function importFiles(workspaceInput, tokens) {
   return imported;
 }
 
-async function verifyCharterDraftProvenance({ runId, projectId }) {
+async function findVerifiedCharterDraftArtifact({ runId, projectId }) {
   if (typeof runId !== 'string' || !runId || typeof projectId !== 'string' || !projectId) return false;
   // ponytail: bounded run-directory scan; index Charter drafts by run ID if run volume grows.
   const runsRoot = path.join(currentProjectWorkspace(), '.science', 'runs');
@@ -433,6 +434,31 @@ async function verifyCharterDraftProvenance({ runId, projectId }) {
   return null;
 }
 
+async function confirmApprovedCharterChange(current, nextCharter) {
+  if (current?.status !== 'approved'
+    || researchCharterContentString(current) === researchCharterContentString(nextCharter)) return;
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: 'Change approved Research Charter',
+    message: 'This change creates a new revision and reopens the Scoping Gate.',
+    detail: 'Existing results and completed stage records are preserved. Continue?',
+    buttons: ['Cancel', 'Continue'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
+  productRepository.recordCheckpoint({
+    type: 'research-charter-change',
+    decision,
+    rationale: decision === 'approved'
+      ? 'User approved revising the approved Research Charter.'
+      : 'User cancelled revising the approved Research Charter.',
+    metadata: { charterVersion: current.version },
+  });
+  if (decision !== 'approved') throw new Error('User cancelled the Research Charter change.');
+}
+
 async function runAgent(payload, sender) {
   if (!runtimeManager) throw new Error('Science Agent runtime is not ready.');
   const state = productRepository.loadState();
@@ -442,10 +468,40 @@ async function runAgent(payload, sender) {
     throw new Error('只能运行当前 Research Project 中的 Conversation。');
   }
   const stageKey = state.project?.stageGraph?.currentStageKey || null;
-  const approvedCharter = state.project?.charter?.approved || null;
-  if (stageKey !== 'scoping' && !approvedCharter) {
-    throw new Error('进入 Evidence 后，Research Run 必须引用当前 approved Research Charter。');
+  const policyDecision = evaluateResearchRunPolicy({
+    stageKey,
+    charter: state.project?.charter,
+  });
+  if (!policyDecision.allowed) {
+    if (policyDecision.requiresConfirmation) {
+      const confirmation = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Confirm external transmission',
+        message: 'The Research Charter requires sensitive-data confirmation.',
+        detail: 'This run will send task context and selected material to an external Model Provider.',
+        buttons: ['Cancel', 'Continue'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
+      productRepository.recordCheckpoint({
+        type: 'external-transmission',
+        decision,
+        rationale: decision === 'approved'
+          ? 'User confirmed sensitive external transmission.'
+          : 'User cancelled sensitive external transmission.',
+        metadata: {
+          policy: policyDecision.policy,
+          charterVersion: state.project?.charter?.currentVersion || null,
+        },
+      });
+      if (decision !== 'approved') throw new Error('User cancelled sensitive external transmission.');
+    } else {
+      throw new Error(policyDecision.message);
+    }
   }
+  const approvedCharter = policyDecision.approvedCharter || null;
   const enrichedPayload = {
     ...payload,
     projectId: state.activeProjectId,
@@ -550,7 +606,7 @@ function installIpc() {
     const revisionOrigin = payload?.revisionOrigin === 'agent' ? 'agent' : 'user';
     const generatedByRunId = typeof payload?.generatedByRunId === 'string' ? payload.generatedByRunId : null;
     if (revisionOrigin === 'agent') {
-      const provenance = await verifyCharterDraftProvenance({
+      const provenance = await findVerifiedCharterDraftArtifact({
         runId: generatedByRunId,
         projectId: productRepository.loadState().activeProjectId,
       });
@@ -563,11 +619,21 @@ function installIpc() {
     } else {
       assertNoActiveResearchRun();
     }
+    const state = productRepository.loadState();
+    await confirmApprovedCharterChange(state.project?.charter?.current || null, payload?.charter);
     return productRepository.saveResearchCharterDraft({
       charter: payload?.charter,
       revisionOrigin,
       generatedByRunId,
     });
+  });
+  ipcMain.handle('project:charter-restore-revision', async (_event, payload) => {
+    assertNoActiveResearchRun();
+    const state = productRepository.loadState();
+    const selected = state.project?.charter?.revisions?.find((revision) => revision.version === Number(payload?.version));
+    if (!selected) throw new Error('无法恢复不存在的 Research Charter 版本。');
+    await confirmApprovedCharterChange(state.project?.charter?.current || null, selected);
+    return productRepository.restoreResearchCharterRevision({ version: payload?.version });
   });
   ipcMain.handle('project:charter-approve', (_event, payload) => {
     assertNoActiveResearchRun();

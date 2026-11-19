@@ -520,6 +520,32 @@ test('whitespace-only Research Workspace paths are unbound in queries and lookup
   assert.equal(repository.getProject('scientia-default-project'), null);
 });
 
+
+test('checkpoint decisions persist across repository restarts', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const checkpoint = repository.recordCheckpoint({
+    type: 'external-transmission',
+    decision: 'approved',
+    rationale: 'User confirmed sensitive external transmission.',
+    metadata: { charterVersion: 2, dataPolicy: 'sensitive' },
+  });
+  assert.match(checkpoint.id, /^[a-f0-9-]{36}$/);
+  assert.equal(checkpoint.decision, 'approved');
+
+  repository.close();
+  repository = openTestRepository(databasePath);
+  const checkpoints = repository.listCheckpoints();
+  assert.equal(checkpoints.length, 1);
+  assert.equal(checkpoints[0].type, 'external-transmission');
+  assert.equal(checkpoints[0].metadata.charterVersion, 2);
+});
+
 test('research stages persist completed and not-applicable state across restarts', (t) => {
   const { directory, databasePath } = temporaryDatabase();
   let repository = openTestRepository(databasePath);
@@ -751,14 +777,15 @@ test('Scoping cannot advance or be skipped without an approved Research Charter'
   assert.equal(state.project.charter.current.status, 'draft');
   assert.equal(state.project.charter.current.revisionOrigin, 'agent');
   assert.equal(state.project.charter.current.generatedByRunId, 'run-scoping-1');
+  assert.match(state.project.charter.current.contentHash, /^[a-f0-9]{64}$/);
   assert.throws(() => repository.completeResearchStage('scoping'), /Charter/);
 
   state = repository.approveResearchCharter({ charter: charter() });
   assert.equal(state.project.stageGraph.currentStageKey, 'evidence');
   assert.equal(state.project.charter.current.status, 'approved');
-  assert.equal(state.project.charter.approved.version, 1);
+  assert.equal(state.project.charter.approved.version, 2);
   assert.equal(state.project.stageGraph.stages[0].status, 'completed');
-  assert.equal(state.project.stageGraph.stages[0].charterVersion, 1);
+  assert.equal(state.project.stageGraph.stages[0].charterVersion, 2);
   assert.equal(state.project.charter.current.generatedByRunId, 'run-scoping-1');
   assert.match(state.project.charter.current.contentHash, /^[a-f0-9]{64}$/);
 });
@@ -799,9 +826,9 @@ test('editing an approved Research Charter creates a revision and requires re-ap
 
   assert.equal(state.project.stageGraph.currentStageKey, 'scoping');
   assert.equal(state.project.stageGraph.stages[1].status, 'completed');
-  assert.equal(state.project.charter.revisions.length, 2);
-  assert.equal(state.project.charter.revisions[0].status, 'approved');
-  assert.equal(state.project.charter.current.version, 2);
+  assert.equal(state.project.charter.revisions.length, 3);
+  assert.equal(state.project.charter.revisions[1].status, 'approved');
+  assert.equal(state.project.charter.current.version, 3);
   assert.equal(state.project.charter.current.status, 'draft');
   assert.equal(state.project.charter.needsReapproval, true);
   assert.equal(state.project.charter.approved, null);
@@ -809,11 +836,37 @@ test('editing an approved Research Charter creates a revision and requires re-ap
 
   state = repository.approveResearchCharter({ charter: revised });
   assert.equal(state.project.stageGraph.currentStageKey, 'inquiry');
-  assert.equal(state.project.stageGraph.stages[0].charterVersion, 2);
-  assert.equal(state.project.charter.current.version, 2);
+  assert.equal(state.project.stageGraph.stages[0].charterVersion, 4);
+  assert.equal(state.project.charter.current.version, 4);
   assert.equal(state.project.charter.current.status, 'approved');
-  assert.equal(state.project.charter.revisions[0].version, 1);
-  assert.equal(state.project.charter.revisions[0].status, 'approved');
+  assert.equal(state.project.charter.revisions[1].version, 2);
+  assert.equal(state.project.charter.revisions[1].status, 'approved');
+});
+
+
+test('a retained Research Charter revision can be restored as a new draft', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  approveTestCharter(repository);
+  const userRevision = charter({ question: 'The user pending revision.' });
+  repository.saveResearchCharterDraft({ charter: userRevision, revisionOrigin: 'user' });
+  repository.saveResearchCharterDraft({
+    charter: charter({ question: 'The later agent revision.' }),
+    revisionOrigin: 'agent',
+    generatedByRunId: 'run-later-agent-draft',
+  });
+
+  const state = repository.restoreResearchCharterRevision({ version: 3 });
+  assert.equal(state.project.charter.current.version, 5);
+  assert.equal(state.project.charter.current.status, 'draft');
+  assert.equal(state.project.charter.current.question, 'The user pending revision.');
+  assert.equal(state.project.charter.current.supersedes, 4);
+  assert.equal(state.project.charter.revisions.find((revision) => revision.version === 3).question, 'The user pending revision.');
 });
 
 test('approved Research Charter revisions survive repository restart for later runs', (t) => {
@@ -836,7 +889,7 @@ test('approved Research Charter revisions survive repository restart for later r
   repository = openTestRepository(databasePath);
   const project = repository.loadState().project;
   assert.equal(project.stageGraph.currentStageKey, 'evidence');
-  assert.equal(project.charter.approved.version, 1);
+  assert.equal(project.charter.approved.version, 2);
   assert.equal(project.charter.approved.dataPolicy, 'sensitive');
   assert.equal(project.charter.approved.citationStyle, 'APA 7');
 });

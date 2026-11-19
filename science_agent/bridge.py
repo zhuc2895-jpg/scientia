@@ -162,7 +162,7 @@ def main() -> int:
         return 2
 
     prompt = user_prompt + run_context["promptSuffix"]
-    if evidence_mode and not charter_draft_mode:
+    if evidence_mode:
         prompt += """
 
 [Application-generated research constraint]
