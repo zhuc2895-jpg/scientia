@@ -280,16 +280,31 @@ try {
   assert.equal(await evaluate(cdp, `document.querySelectorAll('.project-stage-card').length`), 6);
   assert.equal(await evaluate(cdp, `document.querySelector('[data-stage-card="evidence"]')?.classList.contains('pending')`), true);
   assert.match(await evaluate(cdp, `document.querySelector('[data-stage-card="evidence"]')?.title || ''`), /Scoping/);
-  await evaluate(cdp, `(() => {
+  await evaluate(cdp, `(async () => {
+    const draft = {
+      question: 'How should the smoke-test evidence be interpreted?',
+      contribution: 'Verify the Scoping Gate.',
+      scope: 'Only synthetic project data.',
+      methodConstraints: 'Do not fabricate evidence.',
+      successCriteria: 'A traceable stage transition.',
+      paperType: 'Research article',
+      citationStyle: 'Vancouver',
+      dataPolicy: 'standard',
+    };
+    await window.scienceAgent.projectCharterSaveDraft({
+      charter: draft,
+      source: 'agent',
+      generatedByRunId: 'smoke-agent-charter-draft',
+    });
     document.querySelector('[data-stage-action="charter"]').click();
-    document.querySelector('#charter-question').value = 'How should the smoke-test evidence be interpreted?';
-    document.querySelector('#charter-contribution').value = 'Verify the Scoping Gate.';
-    document.querySelector('#charter-scope').value = 'Only synthetic project data.';
-    document.querySelector('#charter-method-constraints').value = 'Do not fabricate evidence.';
-    document.querySelector('#charter-success-criteria').value = 'A traceable stage transition.';
-    document.querySelector('#charter-paper-type').value = 'Research article';
-    document.querySelector('#charter-citation-style').value = 'Vancouver';
-    document.querySelector('#charter-data-policy').value = 'standard';
+    document.querySelector('#charter-question').value = draft.question;
+    document.querySelector('#charter-contribution').value = draft.contribution;
+    document.querySelector('#charter-scope').value = draft.scope;
+    document.querySelector('#charter-method-constraints').value = draft.methodConstraints;
+    document.querySelector('#charter-success-criteria').value = draft.successCriteria;
+    document.querySelector('#charter-paper-type').value = draft.paperType;
+    document.querySelector('#charter-citation-style').value = draft.citationStyle;
+    document.querySelector('#charter-data-policy').value = draft.dataPolicy;
     document.querySelector('#approve-charter').click();
     return true;
   })()`);

@@ -91,6 +91,53 @@ test('editing an approved charter creates a re-approval revision and retains his
   assert.equal(state.revisions.length, 2);
 });
 
+
+test('a later agent draft creates a new revision after a user-edited reapproval draft', () => {
+  let state = saveResearchCharterDraft(undefined, charter(), {
+    source: 'agent',
+    updatedAt: timestamp,
+    generatedByRunId: 'run-draft-1',
+  });
+  state = approveResearchCharter(state, { approvedAt: '2026-11-19T08:02:00.000Z' });
+  state = saveResearchCharterDraft(state, charter({ question: 'User revised question.' }), {
+    source: 'user',
+    updatedAt: '2026-11-19T08:03:00.000Z',
+  });
+  state = saveResearchCharterDraft(state, charter({ question: 'Agent revised question.' }), {
+    source: 'agent',
+    updatedAt: '2026-11-19T08:04:00.000Z',
+    generatedByRunId: 'run-draft-2',
+  });
+
+  assert.equal(state.revisions.length, 3);
+  assert.equal(state.revisions[1].version, 2);
+  assert.equal(state.revisions[1].status, 'draft');
+  assert.equal(state.revisions[1].question, 'User revised question.');
+  assert.equal(currentResearchCharter(state).version, 3);
+  assert.equal(currentResearchCharter(state).status, 'draft');
+  assert.equal(currentResearchCharter(state).supersedes, 2);
+  assert.equal(currentResearchCharter(state).question, 'Agent revised question.');
+  assert.equal(currentResearchCharter(state).generatedByRunId, 'run-draft-2');
+});
+
+
+test('an identical agent draft still records agent provenance over a user draft', () => {
+  let state = saveResearchCharterDraft(undefined, charter(), {
+    source: 'user',
+    updatedAt: timestamp,
+  });
+  state = saveResearchCharterDraft(state, charter(), {
+    source: 'agent',
+    updatedAt: '2026-11-19T08:05:00.000Z',
+    generatedByRunId: 'run-identical-agent-draft',
+  });
+
+  assert.equal(state.revisions.length, 2);
+  assert.equal(state.revisions[0].source, 'user');
+  assert.equal(currentResearchCharter(state).source, 'agent');
+  assert.equal(currentResearchCharter(state).generatedByRunId, 'run-identical-agent-draft');
+});
+
 test('normalization ignores corrupt revisions and keeps the latest coherent draft', () => {
   const state = normalizeResearchCharterState({
     currentVersion: 9,

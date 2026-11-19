@@ -688,12 +688,16 @@ function renderResearchCharterDialog() {
           <time>${escapeHTML(formatTime(revision.updatedAt))}</time>
         </div>`).join('')
     : '<div class="charter-revision-empty">批准或保存修订后，这里会保留版本历史。</div>';
-  const canApprove = graph?.currentStageKey === 'scoping';
+  const canApprove = graph?.currentStageKey === 'scoping' && Boolean(charter?.current?.generatedByRunId);
   els.charterApprove.hidden = !canApprove;
   els.charterSaveDraft.textContent = charter?.current?.status === 'approved' ? '保存为新修订' : '保存草稿';
-  els.charterFootnote.textContent = graph?.currentStageKey === 'scoping'
-    ? '批准后将原子地完成 Scoping 并进入 Evidence。'
-    : '编辑已批准 Charter 会创建新修订并重新打开 Scoping Gate；已完成阶段记录与研究产出都会保留，批准后才能继续。';
+  if (graph?.currentStageKey !== 'scoping') {
+    els.charterFootnote.textContent = '编辑已批准 Charter 会创建新修订并重新打开 Scoping Gate；已完成阶段记录与研究产出都会保留，批准后才能继续。';
+  } else if (!charter?.current?.generatedByRunId) {
+    els.charterFootnote.textContent = '必须先由 Science Agent 起草 Research Charter，用户才能编辑并批准。';
+  } else {
+    els.charterFootnote.textContent = '批准后将原子地完成 Scoping 并进入 Evidence。';
+  }
 }
 
 function openResearchCharterDialog() {

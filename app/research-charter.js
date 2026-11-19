@@ -157,7 +157,28 @@ export function saveResearchCharterDraft(state, value, {
 
   const unchanged = FIELD_KEYS.every((key) => current[key] === fields[key]);
   if (current.status === 'draft') {
-    if (unchanged) return normalized;
+    const agentTakesOverUserDraft = revisionSource === 'agent' && current.source === 'user';
+    if (unchanged && !agentTakesOverUserDraft) return normalized;
+    if (agentTakesOverUserDraft) {
+      const revision = {
+        ...fields,
+        version: current.version + 1,
+        status: 'draft',
+        source: 'agent',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        approvedAt: null,
+        approvedBy: null,
+        supersedes: current.version,
+        generatedByRunId: normalizedRunId || current.generatedByRunId || null,
+        contentHash: null,
+      };
+      return {
+        currentVersion: revision.version,
+        approvedVersion: normalized.approvedVersion,
+        revisions: [...normalized.revisions, revision],
+      };
+    }
     const revision = {
       ...current,
       ...fields,
@@ -183,7 +204,7 @@ export function saveResearchCharterDraft(state, value, {
     approvedAt: null,
     approvedBy: null,
     supersedes: current.version,
-    generatedByRunId: normalizedRunId,
+    generatedByRunId: normalizedRunId || current.generatedByRunId || null,
     contentHash: null,
   };
   return {

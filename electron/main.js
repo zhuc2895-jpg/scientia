@@ -19,6 +19,7 @@ import { removeManagedProjectWorkspace } from './project-workspace.js';
 import { pathKey } from './path-boundary.js';
 import { createConfigStore } from './config-store.js';
 import { createResearchProjectLifecycle } from './research-project-lifecycle.js';
+import { evaluateResearchRunPolicy } from '../app/research-run-policy.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -395,16 +396,33 @@ async function runAgent(payload, sender) {
     throw new Error('只能运行当前 Research Project 中的 Conversation。');
   }
   const stageKey = state.project?.stageGraph?.currentStageKey || null;
-  const approvedCharter = state.project?.charter?.approved || null;
-  if (stageKey !== 'scoping' && !approvedCharter) {
-    throw new Error('进入 Evidence 后，Research Run 必须引用当前已批准的 Research Charter。');
+  const policyDecision = evaluateResearchRunPolicy({
+    stageKey,
+    charter: state.project?.charter,
+  });
+  if (!policyDecision.allowed) {
+    if (policyDecision.requiresConfirmation) {
+      const confirmation = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: '确认外部数据传输',
+        message: '当前 Research Charter 使用 sensitive Data Processing Policy。',
+        detail: '本轮 Research Run 会把任务上下文与选定资料发送给外部 Model Provider。是否继续？',
+        buttons: ['取消', '继续'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (confirmation.response !== 1) throw new Error('用户取消了敏感资料的外部传输。');
+    } else {
+      throw new Error(policyDecision.message);
+    }
   }
   const enrichedPayload = {
     ...payload,
     projectId: state.activeProjectId,
     stageKey,
-    researchCharter: approvedCharter,
-    charterDraftMode: stageKey === 'scoping' && !approvedCharter,
+    researchCharter: policyDecision.approvedCharter,
+    charterDraftMode: policyDecision.charterDraftMode,
   };
   return runtimeManager.run(enrichedPayload, sender, researchWorkspace);
 }

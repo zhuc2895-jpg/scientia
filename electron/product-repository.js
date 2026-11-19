@@ -506,6 +506,9 @@ export function openProductRepository({ databasePath }) {
       source: 'user',
       updatedAt: timestamp,
     });
+    if (!currentResearchCharter(drafted)?.generatedByRunId) {
+      throw new Error('Research Charter 必须由 Science Agent 起草后才能批准。');
+    }
     let approvedCharter = approveCharterState(drafted, { approvedAt: timestamp });
     const approvedContent = currentApprovedResearchCharter(approvedCharter);
     approvedCharter = setCurrentResearchCharterContentHash(

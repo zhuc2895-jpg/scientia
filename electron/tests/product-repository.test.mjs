@@ -34,7 +34,11 @@ function charter(overrides = {}) {
 
 function approveTestCharter(repository, overrides = {}) {
   const fields = charter(overrides);
-  repository.saveResearchCharterDraft({ charter: fields, source: 'user' });
+  repository.saveResearchCharterDraft({
+    charter: fields,
+    source: 'agent',
+    generatedByRunId: 'test-agent-draft',
+  });
   return repository.approveResearchCharter({ charter: fields });
 }
 
@@ -725,6 +729,25 @@ test('Scoping cannot advance or be skipped without an approved Research Charter'
   assert.match(state.project.charter.current.contentHash, /^[a-f0-9]{64}$/);
 });
 
+
+test('Research Charter approval requires an agent-drafted revision', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const fields = charter();
+  repository.saveResearchCharterDraft({ charter: fields, source: 'user' });
+
+  assert.throws(
+    () => repository.approveResearchCharter({ charter: fields }),
+    /Science Agent/,
+  );
+  assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'scoping');
+});
+
 test('editing an approved Research Charter creates a revision and requires re-approval', (t) => {
   const { directory, databasePath } = temporaryDatabase();
   const repository = openTestRepository(databasePath);
@@ -768,7 +791,11 @@ test('approved Research Charter revisions survive repository restart for later r
   });
 
   const fields = charter({ dataPolicy: 'sensitive', citationStyle: 'APA 7' });
-  repository.saveResearchCharterDraft({ charter: fields, source: 'agent' });
+  repository.saveResearchCharterDraft({
+    charter: fields,
+    source: 'agent',
+    generatedByRunId: 'run-restart-charter',
+  });
   repository.approveResearchCharter({ charter: fields });
   repository.close();
 
