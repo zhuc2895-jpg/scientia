@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T15:07:39Z",
-  "updated_at": "2026-11-20T12:58:38Z",
+  "updated_at": "2026-11-20T13:30:01Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -7457,9 +7457,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "2e7dd7a83967d62971031dab9c87fc9de1d46edde0df21f7d5be89f7f1efd282",
-      "size": 20244,
-      "normalized_sha256": "2e7dd7a83967d62971031dab9c87fc9de1d46edde0df21f7d5be89f7f1efd282"
+      "sha256": "3290d579355b2ebb85b8ad7d6a115a303689d78ef973b8c2e3f2cbe13fb87797",
+      "size": 21603,
+      "normalized_sha256": "3290d579355b2ebb85b8ad7d6a115a303689d78ef973b8c2e3f2cbe13fb87797"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -7481,9 +7481,9 @@
     },
     "app/app.js": {
       "role": "index",
-      "sha256": "d8cd97a0841e7f52d2547733bef09773c591bd45df0b26217f82d0b1983e92af",
-      "size": 119741,
-      "normalized_sha256": "d8cd97a0841e7f52d2547733bef09773c591bd45df0b26217f82d0b1983e92af"
+      "sha256": "3bbd3d1521423a6189b26143210a2cd34fbef77ba95921d01f7eb0f636f267a0",
+      "size": 123663,
+      "normalized_sha256": "9fae9dba1796565d7956d9048529abffc57a06123a90fa1d504959dda503899d"
     },
     "app/assets/fonts/LeeeafHei-Regular.ttf": {
       "role": "observe",
@@ -7527,9 +7527,9 @@
     },
     "app/source-library.js": {
       "role": "index",
-      "sha256": "83af1c0b2e6d0eeb521911242f0bb867a30c844612f48bec99a097e8231fb07d",
-      "size": 17101,
-      "normalized_sha256": "83af1c0b2e6d0eeb521911242f0bb867a30c844612f48bec99a097e8231fb07d"
+      "sha256": "92a686f221300fee81b6393fd09e67a3dd512622199ce8fd81fbde619bd748d0",
+      "size": 17539,
+      "normalized_sha256": "348d29dc9a8965cba77f332cc788bcd2bab0aedd9fca3a313de94be12dd5c733"
     },
     "app/styles.css": {
       "role": "index",
@@ -7641,9 +7641,9 @@
     },
     "electron/main.js": {
       "role": "index",
-      "sha256": "32c200cfdb33cd51ecdcb285e7dd5292c44b04c4ba1ad75ded68347d8f76000c",
-      "size": 42462,
-      "normalized_sha256": "32c200cfdb33cd51ecdcb285e7dd5292c44b04c4ba1ad75ded68347d8f76000c"
+      "sha256": "83a02ae5842425f6a3bcef2465d6305d54a0b0b06ff5a35a0076384fa4dc8f4f",
+      "size": 43515,
+      "normalized_sha256": "56163093a0dee559093a65c46166a7e946f6082acc75bb94daf7b861e66385d5"
     },
     "electron/native-secret-input.js": {
       "role": "index",
@@ -7659,15 +7659,15 @@
     },
     "electron/preload.cjs": {
       "role": "index",
-      "sha256": "06a151227eced9965685d2ca8e618df7044a41b9a4cfb5fbf389226d19b5eff7",
-      "size": 4196,
-      "normalized_sha256": "06a151227eced9965685d2ca8e618df7044a41b9a4cfb5fbf389226d19b5eff7"
+      "sha256": "c5d295caa7648ba826cc0d1531842d139cfec9a682874df3a74fbcb3462569da",
+      "size": 4445,
+      "normalized_sha256": "86145198ac274b4b713bfef8612015f40b6a78963ea8e4c1e28b977d41efaedd"
     },
     "electron/product-repository.js": {
       "role": "index",
-      "sha256": "3e92fcbc9a90465897c37e2bac49b946c41858cbddc07d83cc33d46ec33d880a",
-      "size": 53191,
-      "normalized_sha256": "3e92fcbc9a90465897c37e2bac49b946c41858cbddc07d83cc33d46ec33d880a"
+      "sha256": "a3812d64d4eec34c23352b41ed7aa1f60188fe044c34a9d2f655c3e6bf8c6227",
+      "size": 58078,
+      "normalized_sha256": "235022880ade9e77f63d6ab10a84ab5c3de51ab72a6a1e204694b4100e0d3ef5"
     },
     "electron/project-workspace.js": {
       "role": "index",
@@ -7698,6 +7698,12 @@
       "sha256": "3a5c2df56d5d0b45d2c129f02b92803efd7a273e9689bdff77ed906d6bf0907f",
       "size": 8385,
       "normalized_sha256": "3a5c2df56d5d0b45d2c129f02b92803efd7a273e9689bdff77ed906d6bf0907f"
+    },
+    "electron/source-verification.js": {
+      "role": "index",
+      "sha256": "afe7cf54516e4338724fdf39fdc4f17f6eabe4aa8ed301a66ca7c139c47c640f",
+      "size": 5415,
+      "normalized_sha256": "6445ff8680f3b1ea8f795bd23bb0521501e85b86880bc5c7717ea25c06680c80"
     },
     "electron/tests/app-lifecycle.test.mjs": {
       "role": "observe",
@@ -7731,9 +7737,9 @@
     },
     "electron/tests/product-repository.test.mjs": {
       "role": "observe",
-      "sha256": "3c9e6a86548f8e4c1bf0ed78af236886f927df9855daf1b17d5b752b67d64151",
-      "size": 49094,
-      "normalized_sha256": "3c9e6a86548f8e4c1bf0ed78af236886f927df9855daf1b17d5b752b67d64151"
+      "sha256": "fdd88a1cd7be54423d325b092d28c2f62f73fa4a2cfebe327a7a4537844cb5b6",
+      "size": 56394,
+      "normalized_sha256": "f8d6ee9ee48a9b0f7f6e2abe55a1f1ebb8eddcbd1d8c457b42cd420cf3b89e9e"
     },
     "electron/tests/project-workspace.test.mjs": {
       "role": "observe",
@@ -7779,9 +7785,15 @@
     },
     "electron/tests/source-library.test.mjs": {
       "role": "observe",
-      "sha256": "65a8e7dbaa895ae3c39dda4a327fa96ed1d27aa81c76209fa7acdaf9d8ec340c",
-      "size": 6621,
-      "normalized_sha256": "65a8e7dbaa895ae3c39dda4a327fa96ed1d27aa81c76209fa7acdaf9d8ec340c"
+      "sha256": "fe036347ea103c04c631d0c19b1b02f771abddc336ac8a7c773ecbbf854bd38c",
+      "size": 7134,
+      "normalized_sha256": "5bea314b2b751e6936cb840765e7bfec820307146d10c8808027112f48b96efb"
+    },
+    "electron/tests/source-verification.test.mjs": {
+      "role": "observe",
+      "sha256": "1ef137f134b3a08f4806586af3796704162b9c3b93c29b4ad734651f2089f1f7",
+      "size": 4821,
+      "normalized_sha256": "4f95fc7ed9a6d8c56dd74f751de2e31cda917fd4bb992035fd7f8e42937544f1"
     },
     "electron/tests/workspace-paths.test.mjs": {
       "role": "observe",
@@ -7819,6 +7831,12 @@
       "size": 12558,
       "normalized_sha256": "11169738cc23e1baa1cdbb1a5441e725e2f1b646346f079d28de75f8a0b4a27f"
     },
+    "science_agent/citation_audit.py": {
+      "role": "index",
+      "sha256": "c2ab1d3843510ea913ebf14d9550330153bd39e582d8a8e13492fa93cf3408c4",
+      "size": 12878,
+      "normalized_sha256": "7a8140a6fc15c79269c01104dc2ddfef0411ed18f1366e997c8087ea8fa6eac7"
+    },
     "science_agent/daemon.py": {
       "role": "index",
       "sha256": "3179242a798194411f748d4001634616bce7cfdbeddd9ad086b8bc95c83bbd74",
@@ -7833,9 +7851,9 @@
     },
     "science_agent/research_runtime.py": {
       "role": "index",
-      "sha256": "066ac14252995af2d3b322c283fb161b72fcaa0553a0765467d16682433a6ee0",
-      "size": 36599,
-      "normalized_sha256": "066ac14252995af2d3b322c283fb161b72fcaa0553a0765467d16682433a6ee0"
+      "sha256": "de54b61c149c102be1de18e25e1b56ca214b0f8b2ecfedba898e4adbd8b1a2de",
+      "size": 29472,
+      "normalized_sha256": "9a52e1a383f70c85f5ac4ac4181627f58867ab92e2a94bbe466017e205029b86"
     },
     "science_agent/system_prompt.md": {
       "role": "index",
@@ -7854,11 +7872,17 @@
       "size": 11412,
       "normalized_sha256": "362206d4e1b419b032f48b5cdd138e609ccea0edb936008dcbeaf73a4a426702"
     },
+    "science_agent/tests/test_citation_audit.py": {
+      "role": "observe",
+      "sha256": "923a269f1176dc7c1992777cc11f9ad5a3c211f3806079eb1eeedfc9b046448b",
+      "size": 6126,
+      "normalized_sha256": "4b41dd9966437db6a1427d444a8bba4085ecaaa0908a77c35a89994b15e115eb"
+    },
     "science_agent/tests/test_research_runtime.py": {
       "role": "observe",
-      "sha256": "34fff60a3db730830f87a39de4da8491db567365ecc184e00fd872d4d2f8bc42",
-      "size": 28979,
-      "normalized_sha256": "34fff60a3db730830f87a39de4da8491db567365ecc184e00fd872d4d2f8bc42"
+      "sha256": "655c9e79a075b059d3d7824f18d6458785cb2c14db964cb06702f5088cf42bc9",
+      "size": 30192,
+      "normalized_sha256": "e1d0cfa6468f4506a76dbc464c4c63183bc604661db1549044bf60ef8f384959"
     },
     "scripts/brace_check.py": {
       "role": "index",
@@ -7916,9 +7940,9 @@
     },
     "scripts/test.mjs": {
       "role": "index",
-      "sha256": "a4651f484143d8225f20d9449b14db677c793d949d6991c81420423c1e1b6a7a",
-      "size": 2478,
-      "normalized_sha256": "a4651f484143d8225f20d9449b14db677c793d949d6991c81420423c1e1b6a7a"
+      "sha256": "d120d0fbbd5c08fba592ffeaf02f1d3cde94928940a2482cca87bcd2619496be",
+      "size": 2640,
+      "normalized_sha256": "52ffadad229135a267ae0f766d20ff1dcb637557d8ed36a8fb06a6438778aa49"
     },
     "scripts/token_balance.py": {
       "role": "index",
