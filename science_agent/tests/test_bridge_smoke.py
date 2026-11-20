@@ -35,7 +35,7 @@ class BridgeSmokeTests(unittest.TestCase):
                 class Result:
                     session_id = "smoke-session"
                     finish_reason = "completed"
-                    final_response = "Observed in [1]. Limitation: synthetic smoke test."
+                    final_response = "A source-backed observation [1]. Limitation: synthetic smoke test."
 
                 class DeepSeekHarness:
                     def __init__(self, **kwargs):
@@ -65,7 +65,7 @@ class BridgeSmokeTests(unittest.TestCase):
                         if "verifiedClaims=" not in prompt:
                             raise RuntimeError("verified claims missing from prompt")
                         output_dir = next((self.cwd / ".science" / "outputs").iterdir())
-                        (output_dir / "report.md").write_text("# Smoke report\\nSupported by [1].\\n", encoding="utf-8")
+                        (output_dir / "report.md").write_text("A source-backed observation [1].\\n", encoding="utf-8")
                         ledger_match = re.search(r"The evidence ledger is `([^`]+)`", prompt)
                         ledger = self.cwd / ledger_match.group(1)
                         ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -161,7 +161,7 @@ class BridgeSmokeTests(unittest.TestCase):
                 timeout=20,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
             events = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
             result = next(event for event in events if event.get("type") == "result")
             self.assertEqual(result["runId"], "run-smoke")

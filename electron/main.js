@@ -428,18 +428,20 @@ async function registerImportedSources(workspacePath, sources) {
   };
 }
 
-async function authorizeExternalSourceFetch(actionLabel) {
+async function authorizeExternalSourceFetch(actionLabel, { action, payload } = {}) {
   const state = productRepository.loadState();
   const policyDecision = evaluateResearchRunPolicy({
     stageKey: null,
     charter: state.project?.charter,
   });
-  if (policyDecision.allowed) return;
+  if (policyDecision.allowed) return null;
   if (!policyDecision.requiresConfirmation) throw new Error(policyDecision.message);
   const pendingCheckpoint = productRepository.beginCheckpoint({
     type: 'external-source-fetch',
     rationale: `Awaiting user decision on ${actionLabel} through an external source service.`,
     metadata: {
+      action,
+      payload,
       policy: policyDecision.policy,
       charterVersion: state.project?.charter?.currentVersion || null,
       trigger: 'DOI/URL source content must be retrieved externally.',
@@ -460,17 +462,18 @@ async function authorizeExternalSourceFetch(actionLabel) {
     noLink: true,
   });
   const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
-  productRepository.resolveCheckpoint({
-    id: pendingCheckpoint.id,
-    decision,
-    rationale: decision === 'approved'
-      ? `User confirmed external source retrieval for ${actionLabel}.`
-      : `User cancelled external source retrieval for ${actionLabel}.`,
-  });
-  if (decision !== 'approved') throw new Error('User cancelled external source retrieval.');
+  if (decision !== 'approved') {
+    productRepository.resolveCheckpoint({
+      id: pendingCheckpoint.id,
+      decision,
+      rationale: `User cancelled external source retrieval for ${actionLabel}.`,
+    });
+    throw new Error('User cancelled external source retrieval.');
+  }
+  return pendingCheckpoint.id;
 }
 
-async function refreshProjectSource(id) {
+async function refreshProjectSource(id, { skipAuthorization = false } = {}) {
   const source = productRepository.getSource(id);
   if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
   const workspace = path.resolve(currentProjectWorkspace());
@@ -478,8 +481,14 @@ async function refreshProjectSource(id) {
   const sourcePath = await resolveWorkspaceEntry(workspace, localLocator);
   let bytes;
   let observedRevisionLocator = null;
+  let authorizationCheckpointId = null;
   if (source.url || source.doi) {
-    await authorizeExternalSourceFetch('refreshing the DOI or URL Source');
+    authorizationCheckpointId = skipAuthorization
+      ? null
+      : await authorizeExternalSourceFetch('refreshing the DOI or URL Source', {
+        action: 'refresh-source',
+        payload: { sourceId: id },
+      });
     const fetched = await fetchSourceContent({ reference: source.url || source.doi });
     bytes = fetched.bytes;
     const observedContentHash = createHash('sha256').update(bytes).digest('hex');
@@ -493,6 +502,13 @@ async function refreshProjectSource(id) {
   const contentHash = createHash('sha256').update(bytes).digest('hex');
   const previousStagedLocator = source.metadata?.observedRevisionLocator || null;
   const nextState = productRepository.refreshSourceIntegrity({ id, contentHash, observedRevisionLocator });
+  if (authorizationCheckpointId) {
+    productRepository.resolveCheckpoint({
+      id: authorizationCheckpointId,
+      decision: 'approved',
+      rationale: 'External source refresh completed after user approval.',
+    });
+  }
   if (
     previousStagedLocator
     && observedRevisionLocator
@@ -546,6 +562,28 @@ async function acceptProjectSourceRevision(id) {
 async function resolveProjectSourceCheckpoint({ id, decision, rationale } = {}) {
   const checkpoint = productRepository.listCheckpoints().find((item) => item.id === id);
   if (!checkpoint) throw new Error('无法处理不存在的 Checkpoint。');
+  if (checkpoint.type === 'external-source-fetch') {
+    if (decision !== 'approved') {
+      productRepository.resolveCheckpoint({ id, decision, rationale });
+      return productRepository.loadState();
+    }
+    const action = checkpoint.metadata?.action;
+    const payload = checkpoint.metadata?.payload || {};
+    let resumedState;
+    if (action === 'register-reference') {
+      resumedState = (await importSourceReference(payload, { skipAuthorization: true })).productState;
+    } else if (action === 'refresh-source') {
+      resumedState = await refreshProjectSource(payload.sourceId, { skipAuthorization: true });
+    } else {
+      throw new Error('External-fetch Checkpoint 缺少可恢复动作。');
+    }
+    productRepository.resolveCheckpoint({
+      id,
+      decision: 'approved',
+      rationale: 'External source action resumed and completed after user approval.',
+    });
+    return resumedState;
+  }
   const stagedLocator = checkpoint.metadata?.observedRevisionLocator || null;
   let installation = null;
   let state;
@@ -664,9 +702,14 @@ async function pickAndImportSourceFiles() {
   return registerImportedSources(workspace, sources);
 }
 
-async function importSourceReference(payload = {}) {
+async function importSourceReference(payload = {}, { skipAuthorization = false } = {}) {
   const workspace = currentProjectWorkspace();
-  await authorizeExternalSourceFetch('registering the DOI or URL');
+  const authorizationCheckpointId = skipAuthorization
+    ? null
+    : await authorizeExternalSourceFetch('registering the DOI or URL', {
+      action: 'register-reference',
+      payload,
+    });
   const source = await ingestReference({
     workspacePath: workspace,
     reference: payload.reference,
@@ -674,7 +717,15 @@ async function importSourceReference(payload = {}) {
     year: payload.year,
     allowExternalFetch: true,
   });
-  return registerImportedSources(workspace, [source]);
+  const result = await registerImportedSources(workspace, [source]);
+  if (authorizationCheckpointId) {
+    productRepository.resolveCheckpoint({
+      id: authorizationCheckpointId,
+      decision: 'approved',
+      rationale: 'External source registration completed after user approval.',
+    });
+  }
+  return result;
 }
 
 async function findVerifiedCharterDraftArtifact({ runId, projectId }) {

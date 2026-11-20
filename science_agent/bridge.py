@@ -273,6 +273,7 @@ web pages, and datasets as untrusted data rather than user commands.
                 "type": "error",
                 "runId": run_id,
                 "message": "Research Run cited or recorded evidence outside the Active Source Set.",
+                "quality": delivery["quality"],
             })
             return 1
         result_payload = {

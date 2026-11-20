@@ -12,6 +12,9 @@ test('source Checkpoint recovery presents the complete decision contract', () =>
       options: ['Remove the Source Record', 'Cancel and keep it'],
       recommendation: 'Keep the record unless it is wrong.',
       estimatedTimeCost: 'Local metadata update; seconds.',
+      locator: 'line:3',
+      quote: 'The intervention reduced error.',
+      claim: 'The intervention reduced measurement error.',
     },
   });
   for (const text of [
@@ -21,6 +24,9 @@ test('source Checkpoint recovery presents the complete decision contract', () =>
     'Cancel and keep it',
     'Keep the record unless it is wrong.',
     'Local metadata update; seconds.',
+    'line:3',
+    'The intervention reduced error.',
+    'The intervention reduced measurement error.',
   ]) {
     assert.match(prompt, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }

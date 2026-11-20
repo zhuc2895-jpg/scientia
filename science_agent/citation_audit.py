@@ -137,15 +137,46 @@ def _authorized_sources(
     return [active[key] for key in active.keys() & registered.keys()]
 
 
+def _normalize_claim(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().strip(".,;:!?").lower()
+
+
+def _citation_claim_text(text: str, start: int, end: int) -> str:
+    left_break = max(text.rfind(mark, 0, start) for mark in ".!?\n")
+    boundary_end = end
+    while boundary_end > start and text[boundary_end - 1] in ".,;:":
+        boundary_end -= 1
+    right_candidates = [
+        index for index in (
+            text.find(".", boundary_end),
+            text.find("!", boundary_end),
+            text.find("?", boundary_end),
+            text.find("\n", boundary_end),
+        ) if index >= 0
+    ]
+    right_break = min(right_candidates) if right_candidates else len(text)
+    sentence = text[left_break + 1:right_break]
+    sentence = CITATION_RE.sub(" ", sentence)
+    sentence = re.sub(r"[()\[\]]+", " ", sentence)
+    return _normalize_claim(sentence)
+
+
+def _evidence_claim_matches(entry: dict[str, Any], citation_claim: str) -> bool:
+    evidence_claim = _normalize_claim(entry.get("claim"))
+    return bool(evidence_claim and citation_claim and evidence_claim == citation_claim)
+
+
 def _source_has_verified_evidence(
     source: dict[str, Any],
     active_sources: list[dict[str, Any]],
     registered_sources: list[dict[str, Any]],
     evidence_entries: list[dict[str, Any]],
+    citation_claim: str,
 ) -> bool:
     identity = _source_identity(source)
     return any(
         identity in {_source_identity(match) for match in _evidence_matching_sources(entry, active_sources, registered_sources)}
+        and _evidence_claim_matches(entry, citation_claim)
         for entry in evidence_entries
         if isinstance(entry, dict)
     )
@@ -156,9 +187,12 @@ def _authorized(
     active_sources: list[dict[str, Any]],
     registered_sources: list[dict[str, Any]],
     evidence_entries: list[dict[str, Any]],
+    citation_claim: str,
 ) -> bool:
     return any(
-        _source_has_verified_evidence(source, active_sources, registered_sources, evidence_entries)
+        _source_has_verified_evidence(
+            source, active_sources, registered_sources, evidence_entries, citation_claim
+        )
         for source in _authorized_sources(reference, active_sources, registered_sources)
     )
 
@@ -290,16 +324,21 @@ def _evidence_matching_sources(
     reference = entry.get("source")
     if not isinstance(reference, str) or not reference.strip():
         return []
-    matches = [
-        source for source in registered_sources
+    active_matches = {
+        _source_identity(source): source
+        for source in active_sources
         if isinstance(source, dict)
         and _reference_matches_source(reference, source)
         and _evidence_survives_source_revision(entry, source)
-    ]
-    unique = {}
-    for source in matches:
-        unique.setdefault(_source_identity(source), source)
-    return list(unique.values())
+    }
+    registered_matches = {
+        _source_identity(source): source
+        for source in registered_sources
+        if isinstance(source, dict)
+        and _reference_matches_source(reference, source)
+        and _evidence_survives_source_revision(entry, source)
+    }
+    return [active_matches[key] for key in active_matches.keys() & registered_matches.keys()]
 
 
 def _out_of_boundary_evidence(
@@ -331,10 +370,12 @@ def audit_citations(
         line for line in payload.splitlines()
         if not re.match(r"\s*\[\d+\]\s+", line)
     )
-    citations = CITATION_RE.findall(citation_text)
+    citation_matches = list(CITATION_RE.finditer(citation_text))
+    citations = [match.group(0) for match in citation_matches]
     forbidden = []
     bibliography = _bibliography_entries(payload)
     number_sources: dict[int, list[dict[str, Any]]] = {}
+    number_evidence: dict[int, list[dict[str, Any]]] = {}
     for entry in evidence_entries:
         if not isinstance(entry, dict) or not str(entry.get("citationNumber") or "").isdigit():
             continue
@@ -343,8 +384,11 @@ def audit_citations(
             sources = number_sources.setdefault(number, [])
             if _source_identity(source) not in {_source_identity(item) for item in sources}:
                 sources.append(source)
+            number_evidence.setdefault(number, []).append(entry)
 
-    for citation in citations:
+    for citation_match in citation_matches:
+        citation = citation_match.group(0)
+        citation_claim = _citation_claim_text(citation_text, citation_match.start(), citation_match.end())
         cleaned = citation.rstrip(".,;")
         if cleaned.lower().startswith(("http://", "https://")):
             while cleaned.endswith(")") and cleaned.count(")") > cleaned.count("("):
@@ -368,6 +412,9 @@ def audit_citations(
                 elif not mapped_sources:
                     forbidden.append(cleaned)
                     break
+                if not any(_evidence_claim_matches(entry, citation_claim) for entry in number_evidence.get(number, [])):
+                    forbidden.append(cleaned)
+                    break
             continue
         latex = LATEX_RE.fullmatch(cleaned.strip())
         if latex:
@@ -387,13 +434,13 @@ def audit_citations(
                 or key not in registered_by_key
                 or _source_identity(active_by_key[key]) != _source_identity(registered_by_key[key])
                 or not _source_has_verified_evidence(
-                    active_by_key[key], active_sources, registered_sources, evidence_entries
+                    active_by_key[key], active_sources, registered_sources, evidence_entries, citation_claim
                 )
                 for key in keys
             ):
                 forbidden.append(cleaned)
             continue
-        if not _authorized(cleaned, active_sources, registered_sources, evidence_entries):
+        if not _authorized(cleaned, active_sources, registered_sources, evidence_entries, citation_claim):
             forbidden.append(cleaned)
 
     return {

@@ -880,9 +880,10 @@ export function openProductRepository({ databasePath }) {
     const normalizedDecision = typeof decision === 'string' ? decision.trim() : '';
     const normalizedRationale = typeof rationale === 'string' ? rationale.trim() : '';
     if (!normalizedDecision || !normalizedRationale) throw new Error('Checkpoint 决定和理由不能为空。');
-    const normalizedMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
     const existing = selectCheckpointById.get(id, project.id);
     if (!existing) throw new Error('无法处理不存在的 Checkpoint。');
+    const providedMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
+    const normalizedMetadata = { ...parseJsonObject(existing.metadata_json), ...providedMetadata };
     updateCheckpoint.run(normalizedDecision, normalizedRationale, JSON.stringify(normalizedMetadata), id, project.id);
     return serializeCheckpoint(selectCheckpointById.get(id, project.id));
   }

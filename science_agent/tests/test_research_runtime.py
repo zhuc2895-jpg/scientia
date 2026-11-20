@@ -15,7 +15,7 @@ from science_agent.research_runtime import (
 )
 
 
-def verified_source(locator: str, **overrides):
+def verified_source(locator: str, verification_claim: str = "The result is supported.", **overrides):
     source = {
         "id": "source-1",
         "localLocator": locator,
@@ -28,7 +28,7 @@ def verified_source(locator: str, **overrides):
             "verification": {
                 "locator": "line:3",
                 "quote": "Supported result.",
-                "claim": "The result is supported.",
+                "claim": verification_claim,
                 "contentHash": "a" * 64,
             },
         },
@@ -210,14 +210,14 @@ class ResearchRuntimeTests(unittest.TestCase):
             self.assertEqual(extracted["citationStyle"], "APA 7")
 
     def test_assess_result_enforces_the_active_source_citation_boundary(self) -> None:
-        active = [verified_source(".science/sources/paper.md")]
+        active = [verified_source(".science/sources/paper.md", verification_claim="Observed in")]
         registered = [*active, {"localLocator": ".science/sources/inactive.md"}]
         active_quality = assess_result(
             "Observed in [1]. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[verified_evidence(".science/sources/paper.md", citationNumber=1)],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md", citationNumber=1, claim="Observed in")],
             registered_sources=registered,
             active_sources=active,
         )
@@ -280,6 +280,7 @@ class ResearchRuntimeTests(unittest.TestCase):
 
         author_year_source = [verified_source(
             ".science/sources/paper.md",
+            verification_claim="Prior work supports this",
             authors=["Jane Smith"],
             year=2023,
         )]
@@ -288,7 +289,7 @@ class ResearchRuntimeTests(unittest.TestCase):
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[verified_evidence(".science/sources/paper.md")],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md", claim="Prior work supports this")],
             registered_sources=author_year_source,
             active_sources=author_year_source,
         )
@@ -364,7 +365,7 @@ class ResearchRuntimeTests(unittest.TestCase):
                 "verification": {
                     "locator": "line:3",
                     "quote": "Solved result.",
-                    "claim": "The result is solved.",
+                    "claim": "Claim",
                     "contentHash": "a" * 64,
                 },
             },
@@ -373,7 +374,7 @@ class ResearchRuntimeTests(unittest.TestCase):
             ".science/sources/paper.md",
             citationNumber=1,
             quote="Solved result.",
-            claim="The result is solved.",
+            claim="Claim",
         )]
         bibliography_fail = assess_result(
             "Claim [1]. Limitation: x.\nReferences\n[1] Unregistered Paper. 2025.",
@@ -422,13 +423,13 @@ class ResearchRuntimeTests(unittest.TestCase):
         self.assertTrue(range_numbers["blocking"])
         self.assertEqual(range_numbers["outOfBoundaryCitations"], ["[1-3]"])
 
-        latex_source = [verified_source(".science/sources/paper.md", citekey="smith2024")]
+        latex_source = [verified_source(".science/sources/paper.md", verification_claim="Prior work", citekey="smith2024")]
         latex_pass = assess_result(
             "Prior work \\cite{smith2024}. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[verified_evidence(".science/sources/paper.md")],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md", claim="Prior work")],
             registered_sources=latex_source,
             active_sources=latex_source,
         )
@@ -455,13 +456,13 @@ class ResearchRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(latex_spaced_fail["blocking"])
 
-        url_source = [verified_source(".science/sources/paper.md", url="https://example.com/paper")]
+        url_source = [verified_source(".science/sources/paper.md", verification_claim="See", url="https://example.com/paper")]
         url_fragment = assess_result(
             "See https://example.com/paper#results. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[verified_evidence(".science/sources/paper.md")],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md", claim="See")],
             registered_sources=url_source,
             active_sources=url_source,
         )
@@ -471,7 +472,7 @@ class ResearchRuntimeTests(unittest.TestCase):
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[verified_evidence(".science/sources/paper.md")],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md", claim="See")],
             registered_sources=url_source,
             active_sources=url_source,
         )

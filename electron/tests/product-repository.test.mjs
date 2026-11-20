@@ -1378,7 +1378,7 @@ test('checkpoints can persist a pending decision before the dialog resolves', (t
     metadata: { sourceId: 'source-1' },
   });
   assert.equal(resolved.decision, 'cancelled');
-  assert.deepEqual(resolved.metadata, { sourceId: 'source-1' });
+  assert.deepEqual(resolved.metadata, { trigger: 'Remove source', risk: 'Evidence freeze', sourceId: 'source-1' });
 });
 
 test('pending source revision checkpoints survive restart and resolve atomically', (t) => {
@@ -1468,6 +1468,34 @@ test('refreshing one record in a shared bibliography marks every dependent recor
     assert.equal(source.verificationState, 'unverified');
     assert.equal(source.metadata.observedRevisionLocator, '.science/source-revisions/new.revision');
   }
+});
+
+test('generic checkpoint resolution preserves the pending audit metadata', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const pending = repository.beginCheckpoint({
+    type: 'external-source-fetch',
+    rationale: 'Sensitive external retrieval.',
+    metadata: {
+      action: 'refresh-source',
+      payload: { sourceId: 'source-1' },
+      policy: 'sensitive',
+      charterVersion: 2,
+    },
+  });
+  const resolved = repository.resolveCheckpoint({
+    id: pending.id,
+    decision: 'approved',
+    rationale: 'User approved retrieval.',
+  });
+  assert.equal(resolved.metadata.action, 'refresh-source');
+  assert.equal(resolved.metadata.payload.sourceId, 'source-1');
+  assert.equal(resolved.metadata.policy, 'sensitive');
 });
 
 test('pending source checkpoints are filtered and accept only explicit decisions', (t) => {
