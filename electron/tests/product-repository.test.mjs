@@ -1201,5 +1201,13 @@ test('source integrity refresh marks changed content stale and revokes Evidence 
   const source = changed.sources.find((item) => item.id === 'source-1');
   assert.equal(source.freshnessState, 'stale');
   assert.equal(source.verificationState, 'unverified');
+  assert.equal(source.contentHash, 'a'.repeat(64));
+  assert.equal(source.observedContentHash, 'b'.repeat(64));
   assert.equal(changed.project.stageGraph.currentStageKey, 'evidence');
+
+  const refreshedAgain = repository.refreshSourceIntegrity({ id: 'source-1', contentHash: 'b'.repeat(64) });
+  const stillStale = refreshedAgain.sources.find((item) => item.id === 'source-1');
+  assert.equal(stillStale.freshnessState, 'stale');
+  assert.equal(stillStale.verificationState, 'unverified');
+  assert.equal(stillStale.contentHash, 'a'.repeat(64));
 });

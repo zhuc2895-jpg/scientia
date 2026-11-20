@@ -462,13 +462,6 @@ async function removeProjectSource(id) {
   });
   if (decision !== 'approved') throw new Error('User cancelled Source Record removal.');
   const nextState = productRepository.removeSource(id);
-  const localLocator = source.localLocator.split('#')[0];
-  const stillReferenced = nextState.sources.some((item) => item.localLocator.split('#')[0] === localLocator);
-  if (!stillReferenced && localLocator.startsWith('.science/sources/')) {
-    const workspace = path.resolve(currentProjectWorkspace());
-    const sourcePath = path.resolve(workspace, localLocator);
-    if (isWithin(workspace, sourcePath)) await fs.rm(sourcePath, { force: true });
-  }
   return nextState;
 }
 
@@ -626,6 +619,7 @@ async function runAgent(payload, sender) {
     stableIdentifier: source.stableIdentifier,
     localLocator: source.localLocator,
     contentHash: source.contentHash,
+    observedContentHash: source.observedContentHash,
     acquiredAt: source.acquiredAt,
     verificationState: source.verificationState,
     freshnessState: source.freshnessState,

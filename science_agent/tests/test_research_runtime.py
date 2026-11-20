@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from science_agent.research_runtime import (
@@ -269,6 +270,53 @@ class ResearchRuntimeTests(unittest.TestCase):
         self.assertTrue(author_year_fail["blocking"])
         self.assertEqual(author_year_fail["outOfBoundaryCitations"], ["(Jones, 2023)"])
 
+        author_year_too_permissive = assess_result(
+            "Prior work (Smith and Jones, 2023) supports this. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=author_year_source,
+            active_sources=author_year_source,
+        )
+        self.assertTrue(author_year_too_permissive["blocking"])
+
+        bare_doi = assess_result(
+            "Prior work 10.1000/unregistered supports this. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=author_year_source,
+            active_sources=author_year_source,
+        )
+        self.assertTrue(bare_doi["blocking"])
+        self.assertEqual(bare_doi["outOfBoundaryCitations"], ["10.1000/unregistered"])
+
+        numbered_bypass = assess_result(
+            "Prior work [42] supports this. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=author_year_source,
+            active_sources=author_year_source,
+        )
+        self.assertTrue(numbered_bypass["blocking"])
+        self.assertEqual(numbered_bypass["outOfBoundaryCitations"], ["[42]"])
+
+        url_source = [{"localLocator": ".science/sources/paper.md", "url": "https://example.com/paper"}]
+        url_fragment = assess_result(
+            "See https://example.com/paper#results. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=url_source,
+            active_sources=url_source,
+        )
+        self.assertFalse(url_fragment["blocking"])
+
         path_collision = assess_result(
             "Observed in [1]. Limitation: one source.",
             "Summarize the evidence.",
@@ -389,6 +437,36 @@ class ResearchRuntimeTests(unittest.TestCase):
             self.assertEqual(manifest["sourceScope"]["registered"][0]["contentHash"], "a" * 64)
             self.assertEqual(manifest["sourceScope"]["active"][0]["title"], "Active paper")
             self.assertEqual(manifest["sourceScope"]["active"][0]["localLocator"], ".science/sources/paper.md")
+
+    def test_finalize_audits_docx_and_pdf_artifact_citations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            context = prepare_research_run(
+                workspace,
+                conversation_id="conversation-binary-artifacts",
+                run_id="run-binary-artifacts",
+                prompt="Create deliverables.",
+                model="deepseek-v4-flash",
+            )
+            output_dir = workspace / context["outputDir"]
+            with zipfile.ZipFile(output_dir / "report.docx", "w") as archive:
+                archive.writestr("word/document.xml", "<w:document><w:t>https://unregistered.example/docx</w:t></w:document>")
+            (output_dir / "report.pdf").write_bytes(b"%PDF-1.4\nhttps://unregistered.example/pdf\n%%EOF")
+
+            result = finalize_research_run(
+                workspace,
+                run_context=context,
+                result_text="Deliverables written. Limitation: one source.",
+                prompt="Create deliverables.",
+                status="completed",
+                registered_sources=[{"localLocator": ".science/sources/paper.md"}],
+                active_sources=[{"localLocator": ".science/sources/paper.md"}],
+            )
+            self.assertTrue(result["quality"]["blocking"])
+            self.assertEqual(
+                set(result["quality"]["outOfBoundaryCitations"]),
+                {"https://unregistered.example/docx", "https://unregistered.example/pdf"},
+            )
 
     def test_finalize_marks_a_run_failed_when_evidence_leaves_the_active_source_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

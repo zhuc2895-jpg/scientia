@@ -72,6 +72,7 @@ function deserializeSource(row) {
     stableIdentifier: row.stable_identifier || null,
     localLocator: row.local_locator,
     contentHash: row.content_hash,
+    observedContentHash: row.observed_content_hash || row.content_hash,
     acquiredAt: row.acquired_at,
     citekey: row.citekey || null,
     bibtex: row.bibtex || null,
@@ -121,6 +122,9 @@ function normalizeSourceRecord(value = {}) {
     stableIdentifier: stableIdentifier ? stableIdentifier.slice(0, 1000) : null,
     localLocator: localLocator.slice(0, 2000),
     contentHash,
+    observedContentHash: typeof value.observedContentHash === 'string' && /^[a-f0-9]{64}$/.test(value.observedContentHash)
+      ? value.observedContentHash
+      : contentHash,
     acquiredAt,
     citekey: typeof value.citekey === 'string' && value.citekey.trim() ? value.citekey.trim().slice(0, 200) : null,
     bibtex: typeof value.bibtex === 'string' && value.bibtex.trim() ? value.bibtex.trim().slice(0, 50000) : null,
@@ -226,6 +230,7 @@ export function openProductRepository({ databasePath }) {
       stable_identifier TEXT,
       local_locator TEXT NOT NULL,
       content_hash TEXT NOT NULL,
+      observed_content_hash TEXT,
       acquired_at TEXT NOT NULL,
       citekey TEXT,
       bibtex TEXT,
@@ -247,6 +252,9 @@ export function openProductRepository({ databasePath }) {
     database.exec(`ALTER TABLE conversations ADD COLUMN project_id TEXT NOT NULL DEFAULT '${DEFAULT_PROJECT_ID}'`);
   }
   const sourceColumns = database.prepare('PRAGMA table_info(sources)').all();
+  if (!sourceColumns.some((column) => column.name === 'observed_content_hash')) {
+    database.exec('ALTER TABLE sources ADD COLUMN observed_content_hash TEXT');
+  }
   if (!sourceColumns.some((column) => column.name === 'citekey')) {
     database.exec('ALTER TABLE sources ADD COLUMN citekey TEXT');
   }
@@ -356,20 +364,20 @@ export function openProductRepository({ databasePath }) {
   const insertSource = database.prepare(`
     INSERT INTO sources (
       id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
-      stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json,
-      verification_state, freshness_state, metadata_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      stable_identifier, local_locator, content_hash, observed_content_hash, acquired_at,
+      citekey, bibtex, csl_json, verification_state, freshness_state, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectSources = database.prepare(`
     SELECT id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
-           stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json,
-           verification_state, freshness_state, metadata_json
+           stable_identifier, local_locator, content_hash, observed_content_hash, acquired_at,
+           citekey, bibtex, csl_json, verification_state, freshness_state, metadata_json
     FROM sources WHERE project_id = ? ORDER BY acquired_at DESC, title ASC, id ASC
   `);
   const selectSourceForProject = database.prepare(`
     SELECT id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
-           stable_identifier, local_locator, content_hash, acquired_at, citekey, bibtex, csl_json,
-           verification_state, freshness_state, metadata_json
+           stable_identifier, local_locator, content_hash, observed_content_hash, acquired_at,
+           citekey, bibtex, csl_json, verification_state, freshness_state, metadata_json
     FROM sources WHERE id = ? AND project_id = ?
   `);
   const selectSourceById = database.prepare('SELECT id, project_id FROM sources WHERE id = ?');
@@ -378,7 +386,7 @@ export function openProductRepository({ databasePath }) {
     'UPDATE sources SET verification_state = ? WHERE id = ? AND project_id = ?',
   );
   const updateSourceIntegrity = database.prepare(
-    'UPDATE sources SET content_hash = ?, freshness_state = ?, verification_state = ? WHERE id = ? AND project_id = ?',
+    'UPDATE sources SET observed_content_hash = ?, freshness_state = ?, verification_state = ? WHERE id = ? AND project_id = ?',
   );
 
   let closed = false;
@@ -1018,6 +1026,7 @@ export function openProductRepository({ databasePath }) {
           source.stableIdentifier,
           source.localLocator,
           source.contentHash,
+          source.observedContentHash,
           source.acquiredAt,
           source.citekey,
           source.bibtex,

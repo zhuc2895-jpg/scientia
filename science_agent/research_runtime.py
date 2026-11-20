@@ -14,6 +14,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import zipfile
 
 IGNORED_DIRS = {".git", "node_modules", ".venv", "__pycache__", ".idea", ".vscode", "dist", "build"}
 HASH_LIMIT_BYTES = 32 * 1024 * 1024
@@ -533,13 +534,14 @@ def _reference_matches_source(reference: str, source: dict[str, Any]) -> bool:
                 source_surnames.add(author_value.split(",", 1)[0].strip().lower())
             else:
                 source_surnames.add(author_value.split()[-1].lower())
-        return bool(source_surnames.intersection(citation_surnames))
+        return bool(citation_surnames) and citation_surnames.issubset(source_surnames)
     source_url = str(source.get("url") or "").strip().rstrip("/").lower()
     source_doi = _doi_from_reference(str(source.get("doi") or source.get("stableIdentifier") or ""))
     reference_doi = _doi_from_reference(lowered)
 
     if lowered.startswith(("http://", "https://")):
-        if source_url and lowered.rstrip("/") == source_url:
+        lowered_url = lowered.split("#", 1)[0].rstrip("/")
+        if source_url and lowered_url == source_url:
             return True
         return bool(reference_doi and source_doi and reference_doi == source_doi)
     if reference_doi:
@@ -592,10 +594,10 @@ def _out_of_boundary_citations(
     active_sources: list[dict[str, Any]],
     registered_sources: list[dict[str, Any]],
     *,
-    numbered_citations_authorized: bool = False,
+    authorized_evidence_count: int = 0,
 ) -> list[str]:
     citations = re.findall(
-        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|\[[0-9]+(?:[,–-][0-9]+)*\]|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)|[A-Z][A-Za-z'’-]+(?:\s+et al\.)?\s+\((?:19|20)\d{2}[a-z]?\)|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
+        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|\b10\.\d{4,9}/[^\s<>()]+|\[[0-9]+(?:[,–-][0-9]+)*\]|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)|[A-Z][A-Za-z'’-]+(?:\s+et al\.)?\s+\((?:19|20)\d{2}[a-z]?\)|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
         result_text,
         flags=re.IGNORECASE,
     )
@@ -603,7 +605,8 @@ def _out_of_boundary_citations(
     for citation in citations:
         cleaned = citation.rstrip(".,;")
         if re.fullmatch(r"\[[0-9]+(?:[,–-][0-9]+)*\]", cleaned):
-            if not numbered_citations_authorized:
+            numbers = [int(value) for value in re.findall(r"\d+", cleaned)]
+            if not numbers or max(numbers) > authorized_evidence_count:
                 unresolved.append(cleaned)
             continue
         if not _is_authorized_reference(cleaned, active_sources, registered_sources):
@@ -616,14 +619,22 @@ def _artifact_audit_text(workspace: Path, artifacts: list[dict[str, Any]]) -> st
     text_suffixes = {".md", ".txt", ".tex", ".csv", ".json", ".html", ".htm", ".yaml", ".yml"}
     for artifact in artifacts:
         relative = artifact.get("path") if isinstance(artifact, dict) else None
-        if not isinstance(relative, str) or Path(relative).suffix.lower() not in text_suffixes:
+        if not isinstance(relative, str):
             continue
         path = (workspace / relative).resolve()
+        suffix = path.suffix.lower()
         try:
-            if path.stat().st_size > 2_000_000:
-                continue
-            chunks.append(path.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
+            if suffix == ".docx":
+                with zipfile.ZipFile(path) as archive:
+                    xml = archive.read("word/document.xml").decode("utf-8", errors="replace")
+                chunks.append(re.sub(r"<[^>]+>", " ", xml))
+            elif suffix in text_suffixes:
+                chunks.append(path.read_text(encoding="utf-8", errors="replace"))
+            else:
+                # ponytail: raw-byte scan catches ASCII citations in PDFs; add a PDF text extractor if compressed streams matter.
+                if path.stat().st_size <= 32 * 1024 * 1024:
+                    chunks.append(path.read_bytes().decode("latin1", errors="replace"))
+        except (OSError, KeyError, zipfile.BadZipFile):
             continue
     return "\n".join(chunks)
 
@@ -690,7 +701,7 @@ def assess_result(
             audit_text if audit_text is not None else text,
             active_sources,
             registered_sources or [],
-            numbered_citations_authorized=authorized_evidence,
+            authorized_evidence_count=len(all_evidence) if authorized_evidence else 0,
         )
         boundary_violation = bool(out_of_boundary_evidence or out_of_boundary_citations)
         checks.append({
@@ -727,7 +738,7 @@ def _source_audit_snapshot(sources: list[dict[str, Any]] | None) -> list[dict[st
             key: source.get(key)
             for key in (
                 "id", "title", "doi", "url", "stableIdentifier", "localLocator",
-                "contentHash", "acquiredAt", "verificationState", "freshnessState",
+                "contentHash", "observedContentHash", "acquiredAt", "verificationState", "freshnessState",
             )
             if source.get(key) is not None
         })
