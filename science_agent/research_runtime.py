@@ -612,6 +612,24 @@ def assess_result(
     }
 
 
+def verified_claim_records(source: dict[str, Any]) -> list[dict[str, Any]]:
+    if source.get("freshnessState") != "current" or source.get("verificationState") != "verified":
+        return []
+    current_hash = str(source.get("observedContentHash") or source.get("contentHash") or "").strip().lower()
+    if not current_hash:
+        return []
+    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+    records = metadata.get("verifications")
+    result = [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
+    if isinstance(metadata.get("verification"), dict):
+        result.append(metadata["verification"])
+    return [
+        record for record in result
+        if str(record.get("contentHash") or "").strip().lower() == current_hash
+        and record.get("locator") and record.get("quote") and record.get("claim")
+    ]
+
+
 def _source_audit_snapshot(sources: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     snapshot: list[dict[str, Any]] = []
     for source in sources or []:

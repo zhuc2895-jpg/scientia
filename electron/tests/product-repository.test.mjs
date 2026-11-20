@@ -1500,3 +1500,56 @@ test('pending source checkpoints are filtered and accept only explicit decisions
   );
   assert.equal(repository.listPendingCheckpoints()[0].id, pending.id);
 });
+
+test('policy and verification checkpoints remain recoverable and atomic', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  const policy = repository.beginCheckpoint({
+    type: 'external-source-fetch',
+    rationale: 'External retrieval requires policy confirmation.',
+    metadata: {
+      trigger: 'Fetch external source.',
+      risk: 'Project context may leave the machine.',
+      options: ['Fetch source content', 'Cancel'],
+      recommendation: 'Fetch only when policy permits.',
+      estimatedTimeCost: 'One network request.',
+    },
+  });
+  const verification = repository.beginCheckpoint({
+    type: 'source-verification',
+    rationale: 'Awaiting verification confirmation.',
+    metadata: {
+      sourceId: 'source-1',
+      ...sourceVerification(),
+      trigger: 'Verify source evidence.',
+      risk: 'Unsupported claims may be cited.',
+      options: ['Verify Source', 'Leave Source unverified'],
+      recommendation: 'Verify only when the quote supports the claim.',
+      estimatedTimeCost: 'Local review.',
+    },
+  });
+  assert.deepEqual(
+    new Set(repository.listPendingCheckpoints().map((checkpoint) => checkpoint.id)),
+    new Set([policy.id, verification.id]),
+  );
+
+  repository.resolveSourceCheckpoint({
+    id: policy.id,
+    decision: 'approved',
+    rationale: 'User allowed the external fetch.',
+  });
+  const state = repository.resolveSourceCheckpoint({
+    id: verification.id,
+    decision: 'approved',
+    rationale: 'User confirmed the evidence and claim.',
+  });
+  assert.equal(state.sources[0].verificationState, 'verified');
+  assert.equal(state.sources[0].metadata.verifications.length, 1);
+  assert.equal(repository.listPendingCheckpoints().length, 0);
+});

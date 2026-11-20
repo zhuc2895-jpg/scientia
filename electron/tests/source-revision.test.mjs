@@ -25,11 +25,13 @@ test('remote revisions stay staged until explicitly installed', async (t) => {
   assert.equal(staged.observedContentHash, contentHash);
   assert.equal(readFileSync(sourcePath, 'utf8'), 'Original source');
 
-  await installSourceRevision({
+  const installation = await installSourceRevision({
     workspacePath: workspace,
     source: { localLocator },
     stagedLocator: staged.stagedLocator,
     expectedContentHash: contentHash,
   });
   assert.equal(readFileSync(sourcePath, 'utf8'), 'Revised source');
+  await installation.rollback();
+  assert.equal(readFileSync(sourcePath, 'utf8'), 'Original source');
 });

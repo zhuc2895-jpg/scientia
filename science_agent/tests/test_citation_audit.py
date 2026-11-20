@@ -5,6 +5,40 @@ import unittest
 from science_agent.citation_audit import audit_citations
 
 
+def verified_source(locator: str, **overrides):
+    source = {
+        "id": "source-1",
+        "localLocator": locator,
+        "title": "Paper",
+        "verificationState": "verified",
+        "freshnessState": "current",
+        "contentHash": "a" * 64,
+        "observedContentHash": "a" * 64,
+        "metadata": {
+            "verification": {
+                "locator": "line:3",
+                "quote": "Supported result.",
+                "claim": "The result is supported.",
+                "contentHash": "a" * 64,
+            },
+        },
+    }
+    source.update(overrides)
+    return source
+
+
+def verified_evidence(locator: str, **overrides):
+    entry = {
+        "source": locator.rsplit("/", 1)[-1],
+        "locator": "line:3",
+        "quote": "Supported result.",
+        "claim": "The result is supported.",
+        "sourceContentHash": "a" * 64,
+    }
+    entry.update(overrides)
+    return entry
+
+
 class CitationAuditTests(unittest.TestCase):
     def test_number_ranges_expand_every_reference(self) -> None:
         source = {"localLocator": ".science/sources/paper.md", "title": "Paper"}
@@ -50,21 +84,21 @@ class CitationAuditTests(unittest.TestCase):
         self.assertEqual(result["outOfBoundaryCitations"], ["https://example.com/Paper"])
 
     def test_latex_cite_allows_space_before_braces(self) -> None:
-        source = {"localLocator": ".science/sources/paper.md", "citekey": "smith2024"}
+        source = verified_source(".science/sources/paper.md", citekey="smith2024")
         result = audit_citations(
             text="See \\cite {smith2024}. Limitation: x.",
             active_sources=[source],
             registered_sources=[source],
-            evidence_entries=[],
+            evidence_entries=[verified_evidence(".science/sources/paper.md")],
         )
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
     def test_author_year_requires_complete_author_set(self) -> None:
-        source = {
-            "localLocator": ".science/sources/paper.md",
-            "authors": ["Jane Smith", "John Jones"],
-            "year": 2023,
-        }
+        source = verified_source(
+            ".science/sources/paper.md",
+            authors=["Jane Smith", "John Jones"],
+            year=2023,
+        )
         incomplete = audit_citations(
             text="See (Smith, 2023). Limitation: x.",
             active_sources=[source],
@@ -76,24 +110,17 @@ class CitationAuditTests(unittest.TestCase):
             text="See (Smith and Jones, 2023). Limitation: x.",
             active_sources=[source],
             registered_sources=[source],
-            evidence_entries=[],
+            evidence_entries=[verified_evidence(".science/sources/paper.md")],
         )
         self.assertEqual(complete["outOfBoundaryCitations"], [])
 
     def test_evidence_created_before_source_revision_is_invalid(self) -> None:
-        source = {
-            "localLocator": ".science/sources/paper.md",
-            "metadata": {"evidenceInvalidBefore": "2026-11-20T10:00:00.000Z"},
-        }
+        source = verified_source('.science/sources/paper.md')
         old_evidence = audit_citations(
             text="Claim [1]. Limitation: x.",
             active_sources=[source],
             registered_sources=[source],
-            evidence_entries=[{
-                "source": "paper.md",
-                "citationNumber": 1,
-                "addedAt": "2026-11-20T09:59:59.000Z",
-            }],
+            evidence_entries=[verified_evidence(".science/sources/paper.md", citationNumber=1, sourceContentHash="b" * 64)],
         )
         self.assertEqual(old_evidence["outOfBoundaryCitations"], ["[1]"])
         self.assertEqual(old_evidence["outOfBoundaryEvidenceSources"], ["paper.md"])
@@ -102,11 +129,7 @@ class CitationAuditTests(unittest.TestCase):
             text="Claim [1]. Limitation: x.",
             active_sources=[source],
             registered_sources=[source],
-            evidence_entries=[{
-                "source": "paper.md",
-                "citationNumber": 1,
-                "addedAt": "2026-11-20T10:00:01.000Z",
-            }],
+            evidence_entries=[verified_evidence(".science/sources/paper.md", citationNumber=1)],
         )
         self.assertEqual(new_evidence["outOfBoundaryCitations"], [])
 
@@ -145,6 +168,7 @@ class CitationAuditTests(unittest.TestCase):
             "contentHash": "a" * 64,
             "observedContentHash": "a" * 64,
             "verificationState": "verified",
+            "freshnessState": "current",
             "metadata": {
                 "verification": {
                     "locator": "line:3",
@@ -207,6 +231,7 @@ class CitationAuditTests(unittest.TestCase):
             "contentHash": "a" * 64,
             "observedContentHash": "a" * 64,
             "verificationState": "verified",
+            "freshnessState": "current",
             "metadata": {
                 "verification": {
                     "locator": "line:3",
@@ -238,6 +263,81 @@ class CitationAuditTests(unittest.TestCase):
             evidence_entries=evidence,
         )
         self.assertEqual(formatted["outOfBoundaryCitations"], [])
+
+
+    def test_latex_citation_requires_the_active_source_set(self) -> None:
+        source = {
+            "id": "source-1",
+            "localLocator": ".science/sources/paper.md",
+            "citekey": "smith2024",
+            "verificationState": "verified",
+            "freshnessState": "current",
+            "contentHash": "a" * 64,
+            "observedContentHash": "a" * 64,
+        }
+        result = audit_citations(
+            text="See \\cite{smith2024}. Limitation: x.",
+            active_sources=[],
+            registered_sources=[source],
+            evidence_entries=[],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], ["\\cite{smith2024}"])
+
+    def test_non_numeric_citation_requires_matching_verified_evidence(self) -> None:
+        source = {
+            "id": "source-1",
+            "localLocator": ".science/sources/paper.md",
+            "doi": "10.1000/abc",
+            "verificationState": "verified",
+            "freshnessState": "current",
+            "contentHash": "a" * 64,
+            "observedContentHash": "a" * 64,
+            "metadata": {
+                "verification": {
+                    "locator": "line:3",
+                    "quote": "Supported result.",
+                    "claim": "The result is supported.",
+                    "contentHash": "a" * 64,
+                },
+            },
+        }
+        without_evidence = audit_citations(
+            text="See 10.1000/abc. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[],
+        )
+        self.assertEqual(without_evidence["outOfBoundaryCitations"], ["10.1000/abc"])
+        with_evidence = audit_citations(
+            text="See 10.1000/abc. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[{
+                "source": "paper.md",
+                "locator": "line:3",
+                "quote": "Supported result.",
+                "claim": "The result is supported.",
+                "sourceContentHash": "a" * 64,
+            }],
+        )
+        self.assertEqual(with_evidence["outOfBoundaryCitations"], [])
+
+    def test_source_without_verification_state_cannot_authorize_a_citation(self) -> None:
+        source = {
+            "id": "source-1",
+            "localLocator": ".science/sources/paper.md",
+            "doi": "10.1000/abc",
+            "freshnessState": "current",
+            "contentHash": "a" * 64,
+            "observedContentHash": "a" * 64,
+        }
+        result = audit_citations(
+            text="See 10.1000/abc. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], ["10.1000/abc"])
 
 
 if __name__ == "__main__":

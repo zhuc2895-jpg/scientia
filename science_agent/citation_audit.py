@@ -43,8 +43,7 @@ def _doi(value: Any) -> str | None:
 
 
 def _source_allowed(source: dict[str, Any]) -> bool:
-    verification_state = source.get("verificationState")
-    return source.get("freshnessState") != "stale" and verification_state in (None, "verified")
+    return source.get("freshnessState") == "current" and source.get("verificationState") == "verified"
 
 
 def _source_surnames(source: dict[str, Any]) -> set[str]:
@@ -120,8 +119,48 @@ def _matches_any_source(
     )
 
 
-def _authorized(reference: str, active_sources: list[dict[str, Any]], registered_sources: list[dict[str, Any]]) -> bool:
-    return _matches_any_source(reference, active_sources) and _matches_any_source(reference, registered_sources)
+def _authorized_sources(
+    reference: str,
+    active_sources: list[dict[str, Any]],
+    registered_sources: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    active = {
+        _source_identity(source): source
+        for source in active_sources
+        if isinstance(source, dict) and _source_allowed(source) and _reference_matches_source(reference, source)
+    }
+    registered = {
+        _source_identity(source): source
+        for source in registered_sources
+        if isinstance(source, dict) and _source_allowed(source) and _reference_matches_source(reference, source)
+    }
+    return [active[key] for key in active.keys() & registered.keys()]
+
+
+def _source_has_verified_evidence(
+    source: dict[str, Any],
+    active_sources: list[dict[str, Any]],
+    registered_sources: list[dict[str, Any]],
+    evidence_entries: list[dict[str, Any]],
+) -> bool:
+    identity = _source_identity(source)
+    return any(
+        identity in {_source_identity(match) for match in _evidence_matching_sources(entry, active_sources, registered_sources)}
+        for entry in evidence_entries
+        if isinstance(entry, dict)
+    )
+
+
+def _authorized(
+    reference: str,
+    active_sources: list[dict[str, Any]],
+    registered_sources: list[dict[str, Any]],
+    evidence_entries: list[dict[str, Any]],
+) -> bool:
+    return any(
+        _source_has_verified_evidence(source, active_sources, registered_sources, evidence_entries)
+        for source in _authorized_sources(reference, active_sources, registered_sources)
+    )
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -333,13 +372,28 @@ def audit_citations(
         latex = LATEX_RE.fullmatch(cleaned.strip())
         if latex:
             keys = [key.strip().lower() for key in latex.group(1).split(",") if key.strip()]
-            registered_keys = {
-                str(source.get("citekey") or "").lower() for source in registered_sources if _source_allowed(source)
+            active_by_key = {
+                str(source.get("citekey") or "").lower(): source
+                for source in active_sources
+                if _source_allowed(source) and source.get("citekey")
             }
-            if any(key not in registered_keys for key in keys):
+            registered_by_key = {
+                str(source.get("citekey") or "").lower(): source
+                for source in registered_sources
+                if _source_allowed(source) and source.get("citekey")
+            }
+            if any(
+                key not in active_by_key
+                or key not in registered_by_key
+                or _source_identity(active_by_key[key]) != _source_identity(registered_by_key[key])
+                or not _source_has_verified_evidence(
+                    active_by_key[key], active_sources, registered_sources, evidence_entries
+                )
+                for key in keys
+            ):
                 forbidden.append(cleaned)
             continue
-        if not _authorized(cleaned, active_sources, registered_sources):
+        if not _authorized(cleaned, active_sources, registered_sources, evidence_entries):
             forbidden.append(cleaned)
 
     return {

@@ -73,6 +73,7 @@ export async function installSourceRevision({
   if (!isWithin(realWorkspace, realTarget)) throw new Error('Source target 指向当前 Research Workspace 之外。');
   const bytes = await fs.readFile(stagedPath);
   if (sha256(bytes) !== normalizedHash) throw new Error('Staged Source revision 已变化，请重新刷新。');
+  const originalBytes = await fs.readFile(targetPath);
   const temporaryPath = `${targetPath}.${randomUUID()}.installing`;
   await fs.writeFile(temporaryPath, bytes, { flag: 'wx' });
   try {
@@ -81,7 +82,12 @@ export async function installSourceRevision({
     await fs.rm(temporaryPath, { force: true });
     throw error;
   }
-  return { contentHash: normalizedHash };
+  return {
+    contentHash: normalizedHash,
+    rollback: async () => {
+      await fs.writeFile(targetPath, originalBytes);
+    },
+  };
 }
 
 export async function removeStagedSourceRevision({ workspacePath, stagedLocator } = {}) {

@@ -479,6 +479,7 @@ async function refreshProjectSource(id) {
   let bytes;
   let observedRevisionLocator = null;
   if (source.url || source.doi) {
+    await authorizeExternalSourceFetch('refreshing the DOI or URL Source');
     const fetched = await fetchSourceContent({ reference: source.url || source.doi });
     bytes = fetched.bytes;
     const observedContentHash = createHash('sha256').update(bytes).digest('hex');
@@ -546,17 +547,24 @@ async function resolveProjectSourceCheckpoint({ id, decision, rationale } = {}) 
   const checkpoint = productRepository.listCheckpoints().find((item) => item.id === id);
   if (!checkpoint) throw new Error('无法处理不存在的 Checkpoint。');
   const stagedLocator = checkpoint.metadata?.observedRevisionLocator || null;
-  if (decision === 'approved' && checkpoint.type === 'source-revision-accepted' && stagedLocator) {
-    const source = productRepository.getSource(checkpoint.metadata?.sourceId);
-    if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
-    await installSourceRevision({
-      workspacePath: currentProjectWorkspace(),
-      source,
-      stagedLocator,
-      expectedContentHash: checkpoint.metadata?.observedContentHash,
-    });
+  let installation = null;
+  let state;
+  try {
+    if (decision === 'approved' && checkpoint.type === 'source-revision-accepted' && stagedLocator) {
+      const source = productRepository.getSource(checkpoint.metadata?.sourceId);
+      if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
+      installation = await installSourceRevision({
+        workspacePath: currentProjectWorkspace(),
+        source,
+        stagedLocator,
+        expectedContentHash: checkpoint.metadata?.observedContentHash,
+      });
+    }
+    state = productRepository.resolveSourceCheckpoint({ id, decision, rationale });
+  } catch (error) {
+    if (installation) await installation.rollback();
+    throw error;
   }
-  const state = productRepository.resolveSourceCheckpoint({ id, decision, rationale });
   if (checkpoint.type === 'source-revision-accepted' && stagedLocator) {
     await removeStagedSourceRevision({ workspacePath: currentProjectWorkspace(), stagedLocator });
   }
@@ -573,6 +581,20 @@ async function verifyProjectSource({ id, locator, quote, claim } = {}) {
     quote,
     claim,
   });
+  const metadata = {
+    sourceId: id,
+    ...verification,
+    trigger: 'User requested Source verification.',
+    risk: 'Verification affects whether this Source may support cited claims.',
+    options: ['Verify Source', 'Leave Source unverified'],
+    recommendation: 'Verify only when the locator and quotation support the limited claim.',
+    estimatedTimeCost: 'Local review; no model cost.',
+  };
+  const pendingCheckpoint = productRepository.beginCheckpoint({
+    type: 'source-verification',
+    rationale: 'Awaiting user confirmation that the quotation supports the limited claim.',
+    metadata,
+  });
   const confirmation = await dialog.showMessageBox(mainWindow, {
     type: 'question',
     title: 'Verify Source Evidence',
@@ -583,26 +605,16 @@ async function verifyProjectSource({ id, locator, quote, claim } = {}) {
     cancelId: 0,
     noLink: true,
   });
-  if (confirmation.response !== 1) throw new Error('User cancelled Source verification.');
-  productRepository.recordCheckpoint({
-    type: 'source-verification',
-    decision: 'approved',
-    rationale: 'The application matched the supplied quotation at the locator and bound it to the current content hash.',
-    metadata: {
-      sourceId: id,
-      ...verification,
-      trigger: 'User requested Source verification.',
-      risk: 'Verification affects whether this Source may support cited claims.',
-      options: ['Verify Source', 'Leave Source unverified'],
-      recommendation: 'Verify only when the locator and quotation support the limited claim.',
-      estimatedTimeCost: 'Local review; no model cost.',
-    },
+  const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
+  const state = await resolveProjectSourceCheckpoint({
+    id: pendingCheckpoint.id,
+    decision,
+    rationale: decision === 'approved'
+      ? 'User confirmed that the quotation supports the limited claim.'
+      : 'User declined Source verification.',
   });
-  return productRepository.setSourceVerification({
-    id,
-    verificationState: 'verified',
-    verification,
-  });
+  if (decision !== 'approved') throw new Error('User cancelled Source verification.');
+  return state;
 }
 
 async function removeProjectSource(id) {

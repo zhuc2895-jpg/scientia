@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 BRIDGE = ROOT / "science_agent" / "bridge.py"
 PATCH = ROOT / "science_agent" / "harness.patch.yml"
 
+from science_agent.research_runtime import verified_claim_records
+
 
 class BridgeSmokeTests(unittest.TestCase):
     def test_bridge_returns_artifacts_and_quality(self) -> None:
@@ -60,14 +62,17 @@ class BridgeSmokeTests(unittest.TestCase):
                             raise RuntimeError("active source content hash missing from prompt")
                         if "sourceContentHash" not in prompt:
                             raise RuntimeError("evidence content hash contract missing from prompt")
+                        if "verifiedClaims=" not in prompt:
+                            raise RuntimeError("verified claims missing from prompt")
                         output_dir = next((self.cwd / ".science" / "outputs").iterdir())
                         (output_dir / "report.md").write_text("# Smoke report\\nSupported by [1].\\n", encoding="utf-8")
                         ledger_match = re.search(r"The evidence ledger is `([^`]+)`", prompt)
                         ledger = self.cwd / ledger_match.group(1)
                         ledger.parent.mkdir(parents=True, exist_ok=True)
                         ledger.write_text(json.dumps({
-                            "claim": "Synthetic observation",
+                            "claim": "A source-backed observation.",
                             "source": "source.md",
+                            "sourceContentHash": "a" * 64,
                             "locator": "line 1",
                             "quote": "A source-backed observation.",
                             "confidence": "high",
@@ -89,16 +94,44 @@ class BridgeSmokeTests(unittest.TestCase):
                 "mode": "literature",
                 "stageKey": "evidence",
                 "activeSources": [{
+                    "id": "source-1",
                     "title": "Registered source",
+                    "authors": ["Jane Smith"],
                     "year": 2026,
                     "stableIdentifier": "doi:10.1000/smoke",
                     "localLocator": ".science/sources/source.md",
+                    "contentHash": "a" * 64,
+                    "observedContentHash": "a" * 64,
+                    "verificationState": "verified",
+                    "freshnessState": "current",
+                    "metadata": {
+                        "verification": {
+                            "locator": "line 1",
+                            "quote": "A source-backed observation.",
+                            "claim": "A source-backed observation.",
+                            "contentHash": "a" * 64,
+                        },
+                    },
                 }],
                 "projectSources": [{
+                    "id": "source-1",
                     "title": "Registered source",
+                    "authors": ["Jane Smith"],
                     "year": 2026,
                     "stableIdentifier": "doi:10.1000/smoke",
                     "localLocator": ".science/sources/source.md",
+                    "contentHash": "a" * 64,
+                    "observedContentHash": "a" * 64,
+                    "verificationState": "verified",
+                    "freshnessState": "current",
+                    "metadata": {
+                        "verification": {
+                            "locator": "line 1",
+                            "quote": "A source-backed observation.",
+                            "claim": "A source-backed observation.",
+                            "contentHash": "a" * 64,
+                        },
+                    },
                 }],
                 "researchCharter": {
                     "version": 2,
@@ -233,6 +266,41 @@ class BridgeSmokeTests(unittest.TestCase):
             self.assertEqual(saved["stageKey"], "scoping")
             self.assertEqual(saved["projectId"], "project-charter-smoke")
             self.assertTrue(saved["charterDraftMode"])
+
+
+class BridgePromptEvidenceTests(unittest.TestCase):
+    def test_stale_sources_do_not_forward_old_verified_claims(self) -> None:
+        source = {
+            "verificationState": "verified",
+            "freshnessState": "stale",
+            "contentHash": "a" * 64,
+            "observedContentHash": "b" * 64,
+            "metadata": {
+                "verification": {
+                    "locator": "line:1",
+                    "quote": "Old quote.",
+                    "claim": "Old claim.",
+                    "contentHash": "a" * 64,
+                },
+            },
+        }
+        self.assertEqual(verified_claim_records(source), [])
+
+    def test_only_claims_bound_to_the_current_hash_are_forwarded(self) -> None:
+        source = {
+            "verificationState": "verified",
+            "freshnessState": "current",
+            "contentHash": "a" * 64,
+            "observedContentHash": "b" * 64,
+            "metadata": {
+                "verifications": [
+                    {"locator": "line:1", "quote": "Old quote.", "claim": "Old claim.", "contentHash": "a" * 64},
+                    {"locator": "line:2", "quote": "Current quote.", "claim": "Current claim.", "contentHash": "b" * 64},
+                ],
+            },
+        }
+        claims = verified_claim_records(source)
+        self.assertEqual([claim["claim"] for claim in claims], ["Current claim."])
 
 
 if __name__ == "__main__":

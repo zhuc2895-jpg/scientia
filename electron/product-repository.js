@@ -42,7 +42,8 @@ const WORKSPACE_KINDS = new Set(['managed', 'imported']);
 const SOURCE_KINDS = new Set(['pdf', 'markdown', 'tex', 'bibtex', 'ris', 'doi', 'url']);
 const VERIFICATION_STATES = new Set(['verified', 'partial', 'unverified']);
 const FRESHNESS_STATES = new Set(['current', 'stale']);
-const SOURCE_CHECKPOINT_TYPES = new Set(['source-revision-accepted', 'source-removal']);
+const SOURCE_CHECKPOINT_TYPES = new Set(['source-revision-accepted', 'source-removal', 'source-verification']);
+const RECOVERABLE_CHECKPOINT_TYPES = new Set([...SOURCE_CHECKPOINT_TYPES, 'external-source-fetch']);
 const SOURCE_CHECKPOINT_DECISIONS = new Set(['approved', 'cancelled']);
 
 function parseJsonObject(value) {
@@ -894,7 +895,7 @@ export function openProductRepository({ databasePath }) {
 
   function listPendingCheckpointRecords() {
     return listCheckpointRecords().filter(
-      (checkpoint) => checkpoint.decision === 'pending' && SOURCE_CHECKPOINT_TYPES.has(checkpoint.type),
+      (checkpoint) => checkpoint.decision === 'pending' && RECOVERABLE_CHECKPOINT_TYPES.has(checkpoint.type),
     );
   }
 
@@ -905,8 +906,8 @@ export function openProductRepository({ databasePath }) {
     if (!existing) throw new Error('无法处理不存在的 Checkpoint。');
     if (existing.decision !== 'pending') throw new Error('Checkpoint 已经处理。');
     const type = existing.type;
-    if (!SOURCE_CHECKPOINT_TYPES.has(type)) {
-      throw new Error('该 Checkpoint 不是 Source 变更决策。');
+    if (!RECOVERABLE_CHECKPOINT_TYPES.has(type)) {
+      throw new Error('该 Checkpoint 不是可恢复的来源决策。');
     }
     const normalizedDecision = typeof decision === 'string' ? decision.trim() : '';
     const normalizedRationale = typeof rationale === 'string' ? rationale.trim() : '';
@@ -926,8 +927,14 @@ export function openProductRepository({ databasePath }) {
             projectId: project.id,
             contentHash: normalizedMetadata.observedContentHash,
           });
-        } else {
+        } else if (type === 'source-removal') {
           applySourceRemovalMutation(project, sourceId, timestamp);
+        } else if (type === 'source-verification') {
+          applySourceVerificationMutation({
+            id: sourceId,
+            projectId: project.id,
+            verification: normalizedMetadata,
+          });
         }
       }
       database.exec('COMMIT');
@@ -1193,56 +1200,77 @@ export function openProductRepository({ databasePath }) {
     revokeEvidenceFreezeAfterSourceMutation(project, timestamp);
   }
 
+  function prepareVerifiedSourceMutation(current, verification) {
+    if (current.freshness_state === 'stale') {
+      throw new Error('过期 Source Record 必须先刷新内容，不能直接标记为 verified。');
+    }
+    if (!sourceMetadataResolved(current)) {
+      throw new Error('Source 元数据尚未解析完整，不能标记为 verified。');
+    }
+    if (!verification || typeof verification !== 'object' || Array.isArray(verification)) {
+      throw new Error('Source 验证必须提供定位、短引文、支持主张与内容哈希。');
+    }
+    const locator = String(verification.locator || '').trim();
+    const quote = String(verification.quote || '').replace(/\s+/g, ' ').trim();
+    const claim = String(verification.claim || '').replace(/\s+/g, ' ').trim();
+    const contentHash = String(verification.contentHash || '').trim().toLowerCase();
+    if (!locator || !quote || !claim) throw new Error('Source 验证必须提供定位、短引文与支持主张。');
+    if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Source 验证内容哈希无效。');
+    const currentHash = current.observed_content_hash || current.content_hash;
+    if (contentHash !== currentHash) throw new Error('Source 内容哈希已变化，必须重新核验。');
+    const record = {
+      locator,
+      quote,
+      claim,
+      contentHash,
+      verifiedAt: typeof verification.verifiedAt === 'string' && !Number.isNaN(Date.parse(verification.verifiedAt))
+        ? new Date(verification.verifiedAt).toISOString()
+        : new Date().toISOString(),
+    };
+    const metadata = parseJsonObject(current.metadata_json);
+    const verifications = Array.isArray(metadata.verifications)
+      ? metadata.verifications.filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      : [];
+    const duplicate = verifications.some((item) => (
+      String(item.locator || '').trim().toLowerCase() === locator.toLowerCase()
+      && String(item.quote || '').replace(/\s+/g, ' ').trim() === quote
+      && String(item.claim || '').replace(/\s+/g, ' ').trim() === claim
+      && String(item.contentHash || '').trim().toLowerCase() === contentHash
+    ));
+    return {
+      metadata: {
+        ...metadata,
+        verification: record,
+        verifications: duplicate ? verifications : [...verifications, record],
+      },
+      record,
+    };
+  }
+
+  function applySourceVerificationMutation({ id, projectId, verification } = {}) {
+    const current = selectSourceForProject.get(id, projectId);
+    if (!current) throw new Error('Source Record 不存在或不属于当前 Research Project。');
+    const prepared = prepareVerifiedSourceMutation(current, verification);
+    updateSourceVerification.run('verified', JSON.stringify(prepared.metadata), id, projectId);
+    return prepared.record;
+  }
+
   function setSourceVerification({ id, verificationState, verification } = {}) {
     assertOpen();
     const project = assertActiveProject();
     if (!VERIFICATION_STATES.has(verificationState)) throw new Error('Source Verification State 无效。');
     const current = selectSourceForProject.get(id, project.id);
     if (!current) throw new Error('Source Record 不存在或不属于当前 Research Project。');
-    if (verificationState === 'verified' && current.freshness_state === 'stale') {
-      throw new Error('过期 Source Record 必须先刷新内容，不能直接标记为 verified。');
-    }
-    if (verificationState === 'verified' && !sourceMetadataResolved(current)) {
-      throw new Error('Source 元数据尚未解析完整，不能标记为 verified。');
-    }
-    let metadata = parseJsonObject(current.metadata_json);
     if (verificationState === 'verified') {
-      if (!verification || typeof verification !== 'object' || Array.isArray(verification)) {
-        throw new Error('Source 验证必须提供定位、短引文、支持主张与内容哈希。');
-      }
-      const locator = String(verification.locator || '').trim();
-      const quote = String(verification.quote || '').replace(/\s+/g, ' ').trim();
-      const claim = String(verification.claim || '').replace(/\s+/g, ' ').trim();
-      const contentHash = String(verification.contentHash || '').trim().toLowerCase();
-      if (!locator || !quote || !claim) throw new Error('Source 验证必须提供定位、短引文与支持主张。');
-      if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Source 验证内容哈希无效。');
-      const currentHash = current.observed_content_hash || current.content_hash;
-      if (contentHash !== currentHash) throw new Error('Source 内容哈希已变化，必须重新核验。');
-      const record = {
-        locator,
-        quote,
-        claim,
-        contentHash,
-        verifiedAt: typeof verification.verifiedAt === 'string' && !Number.isNaN(Date.parse(verification.verifiedAt))
-          ? new Date(verification.verifiedAt).toISOString()
-          : new Date().toISOString(),
-      };
-      const verifications = Array.isArray(metadata.verifications)
-        ? metadata.verifications.filter((item) => item && typeof item === 'object' && !Array.isArray(item))
-        : [];
-      const duplicate = verifications.some((item) => (
-        String(item.locator || '').trim().toLowerCase() === locator.toLowerCase()
-        && String(item.quote || '').replace(/\s+/g, ' ').trim() === quote
-        && String(item.claim || '').replace(/\s+/g, ' ').trim() === claim
-        && String(item.contentHash || '').trim().toLowerCase() === contentHash
-      ));
-      metadata = {
-        ...metadata,
-        verification: record,
-        verifications: duplicate ? verifications : [...verifications, record],
-      };
+      applySourceVerificationMutation({ id, projectId: project.id, verification });
+    } else {
+      updateSourceVerification.run(
+        verificationState,
+        JSON.stringify(parseJsonObject(current.metadata_json)),
+        id,
+        project.id,
+      );
     }
-    updateSourceVerification.run(verificationState, JSON.stringify(metadata), id, project.id);
     return loadState();
   }
 

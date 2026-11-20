@@ -15,6 +15,40 @@ from science_agent.research_runtime import (
 )
 
 
+def verified_source(locator: str, **overrides):
+    source = {
+        "id": "source-1",
+        "localLocator": locator,
+        "title": "Paper",
+        "verificationState": "verified",
+        "freshnessState": "current",
+        "contentHash": "a" * 64,
+        "observedContentHash": "a" * 64,
+        "metadata": {
+            "verification": {
+                "locator": "line:3",
+                "quote": "Supported result.",
+                "claim": "The result is supported.",
+                "contentHash": "a" * 64,
+            },
+        },
+    }
+    source.update(overrides)
+    return source
+
+
+def verified_evidence(locator: str, **overrides):
+    entry = {
+        "source": locator.rsplit("/", 1)[-1],
+        "locator": "line:3",
+        "quote": "Supported result.",
+        "claim": "The result is supported.",
+        "sourceContentHash": "a" * 64,
+    }
+    entry.update(overrides)
+    return entry
+
+
 class ResearchRuntimeTests(unittest.TestCase):
     def test_prepare_and_finalize_records_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -176,14 +210,14 @@ class ResearchRuntimeTests(unittest.TestCase):
             self.assertEqual(extracted["citationStyle"], "APA 7")
 
     def test_assess_result_enforces_the_active_source_citation_boundary(self) -> None:
-        active = [{"localLocator": ".science/sources/paper.md"}]
+        active = [verified_source(".science/sources/paper.md")]
         registered = [*active, {"localLocator": ".science/sources/inactive.md"}]
         active_quality = assess_result(
             "Observed in [1]. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[{"source": "paper.md", "citationNumber": 1}],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md", citationNumber=1)],
             registered_sources=registered,
             active_sources=active,
         )
@@ -244,17 +278,17 @@ class ResearchRuntimeTests(unittest.TestCase):
         self.assertTrue(numbered_citation["blocking"])
         self.assertEqual(numbered_citation["outOfBoundaryCitations"], ["[42]"])
 
-        author_year_source = [{
-            "localLocator": ".science/sources/paper.md",
-            "authors": ["Jane Smith"],
-            "year": 2023,
-        }]
+        author_year_source = [verified_source(
+            ".science/sources/paper.md",
+            authors=["Jane Smith"],
+            year=2023,
+        )]
         author_year_pass = assess_result(
             "Prior work (Smith, 2023) supports this. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[{"source": "paper.md"}],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md")],
             registered_sources=author_year_source,
             active_sources=author_year_source,
         )
@@ -323,11 +357,24 @@ class ResearchRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(duplicate_evidence_number["blocking"])
 
-        bibliography_source = [{
-            "localLocator": ".science/sources/paper.md",
-            "title": "A Reproducible Trial",
-            "freshnessState": "current",
-        }]
+        bibliography_source = [verified_source(
+            ".science/sources/paper.md",
+            title="A Reproducible Trial",
+            metadata={
+                "verification": {
+                    "locator": "line:3",
+                    "quote": "Solved result.",
+                    "claim": "The result is solved.",
+                    "contentHash": "a" * 64,
+                },
+            },
+        )]
+        bibliography_evidence = [verified_evidence(
+            ".science/sources/paper.md",
+            citationNumber=1,
+            quote="Solved result.",
+            claim="The result is solved.",
+        )]
         bibliography_fail = assess_result(
             "Claim [1]. Limitation: x.\nReferences\n[1] Unregistered Paper. 2025.",
             "Cite.",
@@ -343,7 +390,7 @@ class ResearchRuntimeTests(unittest.TestCase):
             "Cite.",
             [],
             1,
-            new_evidence_entries=[{"source": "paper.md", "citationNumber": 1}],
+            new_evidence_entries=bibliography_evidence,
             registered_sources=bibliography_source,
             active_sources=bibliography_source,
         )
@@ -375,16 +422,13 @@ class ResearchRuntimeTests(unittest.TestCase):
         self.assertTrue(range_numbers["blocking"])
         self.assertEqual(range_numbers["outOfBoundaryCitations"], ["[1-3]"])
 
-        latex_source = [{
-            "localLocator": ".science/sources/paper.md",
-            "citekey": "smith2024",
-        }]
+        latex_source = [verified_source(".science/sources/paper.md", citekey="smith2024")]
         latex_pass = assess_result(
             "Prior work \\cite{smith2024}. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[{"source": "paper.md"}],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md")],
             registered_sources=latex_source,
             active_sources=latex_source,
         )
@@ -411,13 +455,13 @@ class ResearchRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(latex_spaced_fail["blocking"])
 
-        url_source = [{"localLocator": ".science/sources/paper.md", "url": "https://example.com/paper"}]
+        url_source = [verified_source(".science/sources/paper.md", url="https://example.com/paper")]
         url_fragment = assess_result(
             "See https://example.com/paper#results. Limitation: one source.",
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[{"source": "paper.md"}],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md")],
             registered_sources=url_source,
             active_sources=url_source,
         )
@@ -427,7 +471,7 @@ class ResearchRuntimeTests(unittest.TestCase):
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[{"source": "paper.md"}],
+            new_evidence_entries=[verified_evidence(".science/sources/paper.md")],
             registered_sources=url_source,
             active_sources=url_source,
         )
