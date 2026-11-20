@@ -141,6 +141,27 @@ export async function ingestSourceFiles({
   return records;
 }
 
+export async function fetchSourceContent({ reference, fetchImpl = globalThis.fetch } = {}) {
+  const classified = classifyReferenceInput(reference);
+  const fetchUrl = classified.kind === 'doi' ? `https://doi.org/${classified.value}` : classified.value;
+  try {
+    if (typeof fetchImpl !== 'function') throw new Error('HTTP 获取不可用。');
+    const response = await fetchImpl(fetchUrl, { redirect: 'follow' });
+    if (!response?.ok) throw new Error(`HTTP ${response?.status || 'unknown'}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > 32 * 1024 * 1024) throw new Error('来源内容超过 32 MiB。');
+    return {
+      classified,
+      fetchUrl,
+      bytes,
+      extension: extensionForContentType(response.headers?.get?.('content-type')),
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`无法获取 DOI/URL 内容：${reason}`);
+  }
+}
+
 export async function ingestReference({
   workspacePath,
   reference,
@@ -153,26 +174,12 @@ export async function ingestReference({
   if (typeof workspacePath !== 'string' || !path.isAbsolute(workspacePath)) {
     throw new Error('Research Workspace 路径无效。');
   }
-  const classified = classifyReferenceInput(reference);
   const id = String(idFactory());
   const acquiredAt = now();
+  const { classified, fetchUrl, bytes, extension } = await fetchSourceContent({ reference, fetchImpl });
   const normalizedTitle = String(title || '').replace(/\s+/g, ' ').trim()
     || (classified.kind === 'doi' ? `DOI ${classified.value}` : classified.value);
   const normalizedYear = normalizeSourceYear(year);
-  const fetchUrl = classified.kind === 'doi' ? `https://doi.org/${classified.value}` : classified.value;
-  let bytes;
-  let extension = '.bin';
-  try {
-    if (typeof fetchImpl !== 'function') throw new Error('HTTP 获取不可用。');
-    const response = await fetchImpl(fetchUrl, { redirect: 'follow' });
-    if (!response?.ok) throw new Error(`HTTP ${response?.status || 'unknown'}`);
-    bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > 32 * 1024 * 1024) throw new Error('来源内容超过 32 MiB。');
-    extension = extensionForContentType(response.headers?.get?.('content-type'));
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`无法获取 DOI/URL 内容：${reason}`);
-  }
   const contentHash = sha256(bytes);
   const directory = path.join(workspacePath, '.science', 'sources');
   const destination = path.join(directory, `${safeSegment(id)}-reference${extension}`);

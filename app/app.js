@@ -1067,7 +1067,9 @@ function renderSourceLibrary() {
           <span class="source-title">${escapeHTML(source.title)}</span>
           <span class="source-meta">${escapeHTML(sourceKindLabel(source.kind))}${escapeHTML(year)} · ${escapeHTML(authors)}${escapeHTML(sourceIdentifierLabel(source))}</span>
         </button>
-        <button type="button" class="source-refresh" data-refresh-source="${escapeHTML(source.id)}" title="刷新来源完整性" aria-label="刷新 ${escapeHTML(source.title)}">↻</button>
+        ${source.freshnessState === 'stale'
+          ? `<button type="button" class="source-refresh" data-accept-source="${escapeHTML(source.id)}" title="接受当前内容版本并重新核验" aria-label="接受 ${escapeHTML(source.title)} 的新版本">✓</button>`
+          : `<button type="button" class="source-refresh" data-refresh-source="${escapeHTML(source.id)}" title="刷新来源完整性" aria-label="刷新 ${escapeHTML(source.title)}">↻</button>`}
         <button type="button" class="source-remove" data-remove-source="${escapeHTML(source.id)}" title="从 Source Library 移除" aria-label="移除 ${escapeHTML(source.title)}">×</button>
       </div>
     `;
@@ -2122,6 +2124,17 @@ function bindEvents() {
     if (checkbox) void setConversationSourceActive(checkbox.dataset.sourceId, checkbox.checked);
   });
   els.sourceList.addEventListener('click', async (event) => {
+    const acceptButton = event.target.closest('[data-accept-source]');
+    if (acceptButton) {
+      try {
+        applyProductState(await bridge.sourceAcceptRevision(acceptButton.dataset.acceptSource));
+        renderAll();
+        showToast('已接受来源的新内容版本，请重新核验后再引用。');
+      } catch (error) {
+        showToast(error.message || '无法接受 Source 新版本。', 5000);
+      }
+      return;
+    }
     const refreshButton = event.target.closest('[data-refresh-source]');
     if (refreshButton) {
       try {
@@ -2619,6 +2632,11 @@ function createPreviewBridge() {
     async sourceRefreshIntegrity(id) {
       const source = previewSources.find((item) => item.id === id);
       if (source) source.freshnessState = 'current';
+      return previewProductState();
+    },
+    async sourceAcceptRevision(id) {
+      const source = previewSources.find((item) => item.id === id);
+      if (source) { source.freshnessState = 'current'; source.verificationState = 'unverified'; }
       return previewProductState();
     },
     async sourceRemove(id) {

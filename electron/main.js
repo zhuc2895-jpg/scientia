@@ -21,7 +21,7 @@ import { createConfigStore } from './config-store.js';
 import { createResearchProjectLifecycle } from './research-project-lifecycle.js';
 import { researchCharterContentString, researchCharterFieldsEqual } from '../app/research-charter.js';
 import { evaluateResearchRunPolicy } from '../app/research-run-policy.js';
-import { ingestReference, ingestSourceFiles } from './source-ingestion.js';
+import { fetchSourceContent, ingestReference, ingestSourceFiles } from './source-ingestion.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -433,9 +433,28 @@ async function refreshProjectSource(id) {
   const localLocator = source.localLocator.split('#')[0];
   const sourcePath = path.resolve(workspace, localLocator);
   if (!isWithin(workspace, sourcePath)) throw new Error('Source local locator 不在当前 Research Workspace 中。');
-  const bytes = await fs.readFile(sourcePath);
+  let bytes;
+  if (source.url || source.doi) {
+    const fetched = await fetchSourceContent({ reference: source.url || source.doi });
+    bytes = fetched.bytes;
+    await fs.writeFile(sourcePath, bytes);
+  } else {
+    bytes = await fs.readFile(sourcePath);
+  }
   const contentHash = createHash('sha256').update(bytes).digest('hex');
   return productRepository.refreshSourceIntegrity({ id, contentHash });
+}
+
+async function acceptProjectSourceRevision(id) {
+  const source = productRepository.getSource(id);
+  if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
+  const workspace = path.resolve(currentProjectWorkspace());
+  const localLocator = source.localLocator.split('#')[0];
+  const sourcePath = path.resolve(workspace, localLocator);
+  if (!isWithin(workspace, sourcePath)) throw new Error('Source local locator 不在当前 Research Workspace 中。');
+  const bytes = await fs.readFile(sourcePath);
+  const contentHash = createHash('sha256').update(bytes).digest('hex');
+  return productRepository.acceptSourceRevision({ id, contentHash });
 }
 
 async function removeProjectSource(id) {
@@ -617,6 +636,7 @@ async function runAgent(payload, sender) {
     url: source.url,
     venue: source.venue,
     stableIdentifier: source.stableIdentifier,
+    citekey: source.citekey,
     localLocator: source.localLocator,
     contentHash: source.contentHash,
     observedContentHash: source.observedContentHash,
@@ -856,6 +876,7 @@ function installIpc() {
   ipcMain.handle('sources:set-active', async (_event, payload) => productRepository.setActiveSources(payload));
   ipcMain.handle('sources:remove', async (_event, id) => removeProjectSource(id));
   ipcMain.handle('sources:refresh-integrity', async (_event, id) => refreshProjectSource(id));
+  ipcMain.handle('sources:accept-revision', async (_event, id) => acceptProjectSourceRevision(id));
   ipcMain.handle('agent:run', async (event, payload) => runAgent(payload, event.sender));
   ipcMain.handle('agent:cancel', async (_event, runId) => cancelAgent(runId));
   ipcMain.handle('research:recover-run', async (_event, payload) => {

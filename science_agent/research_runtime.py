@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import zipfile
+import zlib
 
 IGNORED_DIRS = {".git", "node_modules", ".venv", "__pycache__", ".idea", ".vscode", "dist", "build"}
 HASH_LIMIT_BYTES = 32 * 1024 * 1024
@@ -482,21 +483,6 @@ def _new_artifacts(output_dir: Path, workspace: Path, started_at: str) -> list[d
     return artifacts
 
 
-def _source_reference_tokens(value: Any) -> set[str]:
-    if not isinstance(value, str) or not value.strip():
-        return set()
-    cleaned = value.strip().strip("'\"`").replace("\\", "/").lower()
-    cleaned = cleaned.split("#", 1)[0].rstrip("/")
-    tokens = {cleaned}
-    basename = cleaned.rsplit("/", 1)[-1]
-    if basename:
-        tokens.add(basename)
-    doi_match = re.search(r"(?:doi:|doi\.org/)(10\.\d{4,9}/\S+)", cleaned)
-    if doi_match:
-        tokens.add(doi_match.group(1).rstrip(").,;"))
-    return {token for token in tokens if token}
-
-
 def _doi_from_reference(value: str) -> str | None:
     match = re.search(r"(?:doi:\s*|doi\.org/)?(10\.\d{4,9}/\S+)", value, flags=re.IGNORECASE)
     return match.group(1).rstrip(").,;").lower() if match else None
@@ -589,15 +575,26 @@ def _out_of_boundary_evidence(
     return unresolved
 
 
+def _latex_citation_keys(value: str) -> list[str]:
+    match = re.match(
+        r"\\(?:cite|citep|citet|parencite|textcite)\*?(?:\[[^\]]*\])*\{([^}]+)\}",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return []
+    return [key.strip() for key in match.group(1).split(",") if key.strip()]
+
+
 def _out_of_boundary_citations(
     result_text: str,
     active_sources: list[dict[str, Any]],
     registered_sources: list[dict[str, Any]],
     *,
-    authorized_evidence_count: int = 0,
+    authorized_citation_count: int = 0,
 ) -> list[str]:
     citations = re.findall(
-        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|\b10\.\d{4,9}/[^\s<>()]+|\[[0-9]+(?:[,–-][0-9]+)*\]|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)|[A-Z][A-Za-z'’-]+(?:\s+et al\.)?\s+\((?:19|20)\d{2}[a-z]?\)|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
+        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|\b10\.\d{4,9}/[^\s<>()]+|\[[0-9]+(?:[,–-][0-9]+)*\]|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)|[A-Z][A-Za-z'’-]+(?:\s+et al\.)?\s+\((?:19|20)\d{2}[a-z]?\)|\\(?:cite|citep|citet|parencite|textcite)\*?(?:\[[^\]]*\])*\{[^}]+\}|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
         result_text,
         flags=re.IGNORECASE,
     )
@@ -606,7 +603,14 @@ def _out_of_boundary_citations(
         cleaned = citation.rstrip(".,;")
         if re.fullmatch(r"\[[0-9]+(?:[,–-][0-9]+)*\]", cleaned):
             numbers = [int(value) for value in re.findall(r"\d+", cleaned)]
-            if not numbers or max(numbers) > authorized_evidence_count:
+            if not numbers or max(numbers) > authorized_citation_count:
+                unresolved.append(cleaned)
+            continue
+        latex_keys = _latex_citation_keys(cleaned)
+        if latex_keys:
+            active_keys = {str(source.get("citekey") or "").lower() for source in active_sources if isinstance(source, dict)}
+            registered_keys = {str(source.get("citekey") or "").lower() for source in registered_sources if isinstance(source, dict)}
+            if any(key.lower() not in active_keys or key.lower() not in registered_keys for key in latex_keys):
                 unresolved.append(cleaned)
             continue
         if not _is_authorized_reference(cleaned, active_sources, registered_sources):
@@ -633,7 +637,13 @@ def _artifact_audit_text(workspace: Path, artifacts: list[dict[str, Any]]) -> st
             else:
                 # ponytail: raw-byte scan catches ASCII citations in PDFs; add a PDF text extractor if compressed streams matter.
                 if path.stat().st_size <= 32 * 1024 * 1024:
-                    chunks.append(path.read_bytes().decode("latin1", errors="replace"))
+                    raw = path.read_bytes()
+                    chunks.append(raw.decode("latin1", errors="replace"))
+                    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", raw, flags=re.DOTALL):
+                        try:
+                            chunks.append(zlib.decompress(match.group(1)).decode("latin1", errors="replace"))
+                        except zlib.error:
+                            continue
         except (OSError, KeyError, zipfile.BadZipFile):
             continue
     return "\n".join(chunks)
@@ -701,7 +711,7 @@ def assess_result(
             audit_text if audit_text is not None else text,
             active_sources,
             registered_sources or [],
-            authorized_evidence_count=len(all_evidence) if authorized_evidence else 0,
+            authorized_citation_count=len(active_sources) if authorized_evidence else 0,
         )
         boundary_violation = bool(out_of_boundary_evidence or out_of_boundary_citations)
         checks.append({
@@ -737,7 +747,7 @@ def _source_audit_snapshot(sources: list[dict[str, Any]] | None) -> list[dict[st
         snapshot.append({
             key: source.get(key)
             for key in (
-                "id", "title", "doi", "url", "stableIdentifier", "localLocator",
+                "id", "title", "doi", "url", "stableIdentifier", "citekey", "localLocator",
                 "contentHash", "observedContentHash", "acquiredAt", "verificationState", "freshnessState",
             )
             if source.get(key) is not None

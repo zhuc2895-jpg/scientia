@@ -127,7 +127,7 @@ export function buildSourceRemovalCheckpointMetadata(source = {}) {
     risk: 'The Source Record disappears from the Project and every Active Source Set; Evidence Freeze will be revoked.',
     options: ['Remove the Source Record', 'Cancel and keep the Source Record'],
     recommendation: 'Preserve the Source Record unless it is wrong or no longer relevant; removal returns the Project to Evidence.',
-    estimatedTimeCost: 'Local metadata and managed-copy cleanup; seconds, no model cost.',
+    estimatedTimeCost: 'Local metadata update; the managed source file is preserved; seconds, no model cost.',
   };
 }
 
@@ -253,7 +253,7 @@ export function parseBibTeX(text) {
       doi,
       url,
       venue: cleanBraces(stripWrapping(fields.journal || fields.booktitle || fields.publisher || '')),
-      stableIdentifier: doi ? `doi:${doi}` : url ? `url:${url}` : null,
+      stableIdentifier: stableIdentifierForSource({ doi, url }),
       metadata: { entryType, citationKey, fields },
       raw: source.slice(index + match.index, cursor),
     });
@@ -279,7 +279,7 @@ export function parseRis(text) {
       doi,
       url,
       venue: cleanBraces((current.JO || current.JF || current.T2 || current.BT || [''])[0]),
-      stableIdentifier: doi ? `doi:${doi}` : url ? `url:${url}` : null,
+      stableIdentifier: stableIdentifierForSource({ doi, url }),
       metadata: { entryType: (current.TY || [''])[0] },
       raw: current._raw.join('\n'),
     });
@@ -331,7 +331,7 @@ export function parseMarkdownSource(text, { sourceName = 'source.md' } = {}) {
     doi,
     url,
     venue: cleanBraces(fields.venue || fields.journal || ''),
-    stableIdentifier: doi ? `doi:${doi}` : url ? `url:${url}` : null,
+    stableIdentifier: stableIdentifierForSource({ doi, url }),
     metadata: { frontmatter: fields },
   };
 }
@@ -366,7 +366,7 @@ export function parseTexSource(text, { sourceName = 'source.tex' } = {}) {
     doi,
     url,
     venue: '',
-    stableIdentifier: doi ? `doi:${doi}` : url ? `url:${url}` : null,
+    stableIdentifier: stableIdentifierForSource({ doi, url }),
     metadata: {},
   };
 }
