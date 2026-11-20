@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T15:07:39Z",
-  "updated_at": "2026-11-20T14:34:59Z",
+  "updated_at": "2026-11-20T14:50:18Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -7457,9 +7457,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "de4e21497a2416e4f9433499f12da734e862ca6853bd9ffbecfc76e49f27b8ba",
-      "size": 22792,
-      "normalized_sha256": "de4e21497a2416e4f9433499f12da734e862ca6853bd9ffbecfc76e49f27b8ba"
+      "sha256": "2bf079f3488d97c284d4cdc906670afbfbb1673227300fd6a9810045f1acd2e3",
+      "size": 22961,
+      "normalized_sha256": "2bf079f3488d97c284d4cdc906670afbfbb1673227300fd6a9810045f1acd2e3"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -7497,9 +7497,9 @@
     },
     "app/checkpoint-presentation.js": {
       "role": "index",
-      "sha256": "070ed28e0a68c606625d630a5b8679e1d962aa20e3a90d45ed84f716788ab301",
-      "size": 988,
-      "normalized_sha256": "be8ba9cc2e2a10ffe597c87a0e4cab8bfbe08a07b56c4a72748429772be9ea53"
+      "sha256": "2339fd14b5eccad78fcfd9238309bde879e3a7eea2a755b0de24c922026037c6",
+      "size": 1280,
+      "normalized_sha256": "59abaad189dff3e0818b289cd2d7d5a9cff37a1cfffb10cfa6477a5c262a10d8"
     },
     "app/conversation-state.js": {
       "role": "index",
@@ -7647,9 +7647,9 @@
     },
     "electron/main.js": {
       "role": "index",
-      "sha256": "b6fd591ceee2b27e16bb7940ea0127bf6bc21df306d5debda94ce0bb6c6c3870",
-      "size": 48385,
-      "normalized_sha256": "4e1033ef8ffa628d771c110244d99a5e435ebb804e305b2e2054c392d24e304e"
+      "sha256": "67e9546e3e65de764326bdfd23dc492fbb40d5373fdb32b50fe7749a1c13ff41",
+      "size": 50249,
+      "normalized_sha256": "5d9ef4d86c5649478bc4c0d1974a35939361775f867a115db62ae22e5a7e9b98"
     },
     "electron/native-secret-input.js": {
       "role": "index",
@@ -7671,9 +7671,9 @@
     },
     "electron/product-repository.js": {
       "role": "index",
-      "sha256": "5330a3a12bd4bcefdbd8ff97b745cae84e6deb20e81694323d1cd08987c8ef0e",
-      "size": 61035,
-      "normalized_sha256": "eeef580cf59df29c5886337a60c5929318146b53ecf1e2ce35d57a176e0e8973"
+      "sha256": "4afa71ac14aeba48995960d9356a24c428e080bef8bfb2f57489be72f266be7c",
+      "size": 61134,
+      "normalized_sha256": "e31991fce2350ae2a875db10d71dc4ec00479ec0fc320a8c1880c57bdc6f2a47"
     },
     "electron/project-workspace.js": {
       "role": "index",
@@ -7725,9 +7725,9 @@
     },
     "electron/tests/checkpoint-presentation.test.mjs": {
       "role": "observe",
-      "sha256": "23295cab3eff57ce85cec4080fbe3167c615f5f5688d37e76bdb78e679bb05df",
-      "size": 979,
-      "normalized_sha256": "84d65dde3b51dda85a9754677aae073e4d7c3680f23becdabe10b63a38f7d596"
+      "sha256": "a89859f0abbf4f8a99658420ccc8af30a2cd19f02dfec8cd28bd41fbf7bf12d5",
+      "size": 1222,
+      "normalized_sha256": "4d0bdb2a1aa7c1c850670cca75204b5b1d56c0df62913a755975e1d5067f770c"
     },
     "electron/tests/config-store.test.mjs": {
       "role": "observe",
@@ -7755,9 +7755,9 @@
     },
     "electron/tests/product-repository.test.mjs": {
       "role": "observe",
-      "sha256": "4e66517a3bddc9a5d3e02c9a692314378ba44e8e46464c53e039d16ccb8fd7a8",
-      "size": 61458,
-      "normalized_sha256": "bd5cc50d064d47c57ea795f3577a522beb1c8abc180c1da28df099cf90b051de"
+      "sha256": "8cfa26575526c35b092e33fae9133202276042c80dd7c5f502e95fdeb7682502",
+      "size": 62454,
+      "normalized_sha256": "bd888de3f08106568604e2f9f57489cbca3fd3ef90943df2c1f1aeec8850dd03"
     },
     "electron/tests/project-workspace.test.mjs": {
       "role": "observe",
@@ -7851,15 +7851,15 @@
     },
     "science_agent/bridge.py": {
       "role": "index",
-      "sha256": "5cbab136973c9ad9fe3770877e8a9c9fc535fea0fb6cddfb2663be3373e246b7",
-      "size": 13619,
-      "normalized_sha256": "81ff2dd75c70546d3a23ca3de7ba709a7e6896453b37e7981cb0d681bffb007c"
+      "sha256": "f79efd8e373eb8eb5db5f18b23ccf8376ee2da040941dd0294a22a4ee331817e",
+      "size": 13668,
+      "normalized_sha256": "789fecbd4ef1bbe61baacf7d1ea4dafd54cd956d9a3b5a1a520fc8ac7db4ddfb"
     },
     "science_agent/citation_audit.py": {
       "role": "index",
-      "sha256": "824a34ae74516d8c6416d45f10b2085d0c388eb4cd5061b6c0edf4209f014190",
-      "size": 16327,
-      "normalized_sha256": "01a786b2389a9a37c0e23dbbb3d11a74c91545ca8180a959622b12f2a58323ff"
+      "sha256": "cab39e6e879a9d4e32656b2dd47e3c94b8c8d2c7afee62910fbff8b5deb31b8c",
+      "size": 18493,
+      "normalized_sha256": "daa544878087361b02becdc7b1b162c694dec976b4bf47f0f7ffb92fd1a27658"
     },
     "science_agent/daemon.py": {
       "role": "index",
@@ -7892,21 +7892,21 @@
     },
     "science_agent/tests/test_bridge_smoke.py": {
       "role": "observe",
-      "sha256": "6dcf82dac0039fa765e7b86a368877a51f5a8c8da8c9b8ddb9ed9aebb594b331",
-      "size": 15010,
-      "normalized_sha256": "ab5fc627c192bdc159f3e5f5f46409c1a1adb27eb2c0616074016247cde777de"
+      "sha256": "e9a4447cb864252c0cb14ea4f7c2181b3c2493ce0497b68ff95dc7a910aad641",
+      "size": 15043,
+      "normalized_sha256": "092eeca8304ea6ecba4927c495a0055881dacfc6e4c9b81bc93f642c98fbed8d"
     },
     "science_agent/tests/test_citation_audit.py": {
       "role": "observe",
-      "sha256": "a2200061f3f97bf48e2f8b68981cb7bda0292cdaae3197564d277eb6153bc7cf",
-      "size": 14044,
-      "normalized_sha256": "ee4186833c8d0b9b5850dce85c65f992771173725111b6129e4b3298a2e699d8"
+      "sha256": "79061660ad01995d78ae3e1e712a3110792e23fc6123db683aa5d2cb48dd400c",
+      "size": 16738,
+      "normalized_sha256": "46b64d74d493d3ecee068e9f3ba6beb6448842862599fe7a8cbed433e52df5a5"
     },
     "science_agent/tests/test_research_runtime.py": {
       "role": "observe",
-      "sha256": "705db3c954ead9aa4dac76a897f4cb2f2e460004a2402827078a476e2e0a042c",
-      "size": 31648,
-      "normalized_sha256": "c76fcd66f5ccfc91372d7d9fec2bba7bce233622ef48f7c6c6a8b6eb35dff61f"
+      "sha256": "db3b3f013c149aa36da881179facb5284af0b7c7a99a936bd18548bc64d2f6fe",
+      "size": 31916,
+      "normalized_sha256": "2dd4ec4a3dabbe56c4da1b4eb9b92c78dfad7edef8a7adb9906852c31d818af7"
     },
     "scripts/brace_check.py": {
       "role": "index",
