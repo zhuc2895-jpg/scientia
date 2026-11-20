@@ -23,6 +23,7 @@ import { researchCharterContentString, researchCharterFieldsEqual } from '../app
 import { evaluateResearchRunPolicy } from '../app/research-run-policy.js';
 import { fetchSourceContent, ingestReference, ingestSourceFiles } from './source-ingestion.js';
 import { verifySourceEvidence } from './source-verification.js';
+import { installSourceRevision, removeStagedSourceRevision, stageSourceRevision } from './source-revision.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -427,23 +428,78 @@ async function registerImportedSources(workspacePath, sources) {
   };
 }
 
+async function authorizeExternalSourceFetch(actionLabel) {
+  const state = productRepository.loadState();
+  const policyDecision = evaluateResearchRunPolicy({
+    stageKey: null,
+    charter: state.project?.charter,
+  });
+  if (policyDecision.allowed) return;
+  if (!policyDecision.requiresConfirmation) throw new Error(policyDecision.message);
+  const pendingCheckpoint = productRepository.beginCheckpoint({
+    type: 'external-source-fetch',
+    rationale: `Awaiting user decision on ${actionLabel} through an external source service.`,
+    metadata: {
+      policy: policyDecision.policy,
+      charterVersion: state.project?.charter?.currentVersion || null,
+      trigger: 'DOI/URL source content must be retrieved externally.',
+      risk: 'The requested source locator and project context may leave this machine.',
+      options: ['Fetch source content', 'Cancel'],
+      recommendation: 'Fetch only when the selected source is appropriate for sensitive processing.',
+      estimatedTimeCost: 'One source retrieval; network latency only.',
+    },
+  });
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: 'Confirm external source retrieval',
+    message: 'The Research Charter requires sensitive-data confirmation.',
+    detail: `This action will contact an external source service for ${actionLabel}.`,
+    buttons: ['Cancel', 'Continue'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
+  productRepository.resolveCheckpoint({
+    id: pendingCheckpoint.id,
+    decision,
+    rationale: decision === 'approved'
+      ? `User confirmed external source retrieval for ${actionLabel}.`
+      : `User cancelled external source retrieval for ${actionLabel}.`,
+  });
+  if (decision !== 'approved') throw new Error('User cancelled external source retrieval.');
+}
+
 async function refreshProjectSource(id) {
   const source = productRepository.getSource(id);
   if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
   const workspace = path.resolve(currentProjectWorkspace());
   const localLocator = source.localLocator.split('#')[0];
-  const sourcePath = path.resolve(workspace, localLocator);
-  if (!isWithin(workspace, sourcePath)) throw new Error('Source local locator 不在当前 Research Workspace 中。');
+  const sourcePath = await resolveWorkspaceEntry(workspace, localLocator);
   let bytes;
+  let observedRevisionLocator = null;
   if (source.url || source.doi) {
     const fetched = await fetchSourceContent({ reference: source.url || source.doi });
     bytes = fetched.bytes;
-    await fs.writeFile(sourcePath, bytes);
+    const observedContentHash = createHash('sha256').update(bytes).digest('hex');
+    if (observedContentHash !== (source.observedContentHash || source.contentHash)) {
+      const staged = await stageSourceRevision({ workspacePath: workspace, sourceId: id, bytes });
+      observedRevisionLocator = staged.stagedLocator;
+    }
   } else {
     bytes = await fs.readFile(sourcePath);
   }
   const contentHash = createHash('sha256').update(bytes).digest('hex');
-  return productRepository.refreshSourceIntegrity({ id, contentHash });
+  const previousStagedLocator = source.metadata?.observedRevisionLocator || null;
+  const nextState = productRepository.refreshSourceIntegrity({ id, contentHash, observedRevisionLocator });
+  if (
+    previousStagedLocator
+    && observedRevisionLocator
+    && previousStagedLocator !== observedRevisionLocator
+  ) {
+    await removeStagedSourceRevision({ workspacePath: workspace, stagedLocator: previousStagedLocator });
+  }
+  return nextState;
 }
 
 async function acceptProjectSourceRevision(id) {
@@ -451,10 +507,13 @@ async function acceptProjectSourceRevision(id) {
   if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
   const workspace = path.resolve(currentProjectWorkspace());
   const localLocator = source.localLocator.split('#')[0];
-  const sourcePath = path.resolve(workspace, localLocator);
-  if (!isWithin(workspace, sourcePath)) throw new Error('Source local locator 不在当前 Research Workspace 中。');
-  const bytes = await fs.readFile(sourcePath);
-  const contentHash = createHash('sha256').update(bytes).digest('hex');
+  const sourcePath = await resolveWorkspaceEntry(workspace, localLocator);
+  const stagedLocator = source.metadata?.observedRevisionLocator || null;
+  let contentHash = source.observedContentHash;
+  if (!stagedLocator) {
+    const bytes = await fs.readFile(sourcePath);
+    contentHash = createHash('sha256').update(bytes).digest('hex');
+  }
   const checkpointMetadata = buildSourceRevisionCheckpointMetadata({ ...source, observedContentHash: contentHash });
   const pendingCheckpoint = productRepository.beginCheckpoint({
     type: 'source-revision-accepted',
@@ -472,7 +531,7 @@ async function acceptProjectSourceRevision(id) {
     noLink: true,
   });
   const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
-  const nextState = productRepository.resolveSourceCheckpoint({
+  const nextState = await resolveProjectSourceCheckpoint({
     id: pendingCheckpoint.id,
     decision,
     rationale: decision === 'approved'
@@ -481,6 +540,27 @@ async function acceptProjectSourceRevision(id) {
   });
   if (decision !== 'approved') throw new Error('User cancelled Source revision acceptance.');
   return nextState;
+}
+
+async function resolveProjectSourceCheckpoint({ id, decision, rationale } = {}) {
+  const checkpoint = productRepository.listCheckpoints().find((item) => item.id === id);
+  if (!checkpoint) throw new Error('无法处理不存在的 Checkpoint。');
+  const stagedLocator = checkpoint.metadata?.observedRevisionLocator || null;
+  if (decision === 'approved' && checkpoint.type === 'source-revision-accepted' && stagedLocator) {
+    const source = productRepository.getSource(checkpoint.metadata?.sourceId);
+    if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
+    await installSourceRevision({
+      workspacePath: currentProjectWorkspace(),
+      source,
+      stagedLocator,
+      expectedContentHash: checkpoint.metadata?.observedContentHash,
+    });
+  }
+  const state = productRepository.resolveSourceCheckpoint({ id, decision, rationale });
+  if (checkpoint.type === 'source-revision-accepted' && stagedLocator) {
+    await removeStagedSourceRevision({ workspacePath: currentProjectWorkspace(), stagedLocator });
+  }
+  return state;
 }
 
 async function verifyProjectSource({ id, locator, quote, claim } = {}) {
@@ -493,6 +573,17 @@ async function verifyProjectSource({ id, locator, quote, claim } = {}) {
     quote,
     claim,
   });
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: 'Verify Source Evidence',
+    message: 'Does the located quotation support the recorded limited claim?',
+    detail: `Locator: ${verification.locator}\nQuote: ${verification.quote}\nClaim: ${verification.claim}`,
+    buttons: ['Cancel', 'Confirm verification'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  if (confirmation.response !== 1) throw new Error('User cancelled Source verification.');
   productRepository.recordCheckpoint({
     type: 'source-verification',
     decision: 'approved',
@@ -534,7 +625,7 @@ async function removeProjectSource(id) {
     noLink: true,
   });
   const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
-  const nextState = productRepository.resolveSourceCheckpoint({
+  const nextState = await resolveProjectSourceCheckpoint({
     id: pendingCheckpoint.id,
     decision,
     rationale: decision === 'approved'
@@ -563,11 +654,13 @@ async function pickAndImportSourceFiles() {
 
 async function importSourceReference(payload = {}) {
   const workspace = currentProjectWorkspace();
+  await authorizeExternalSourceFetch('registering the DOI or URL');
   const source = await ingestReference({
     workspacePath: workspace,
     reference: payload.reference,
     title: payload.title,
     year: payload.year,
+    allowExternalFetch: true,
   });
   return registerImportedSources(workspace, [source]);
 }
@@ -937,7 +1030,7 @@ function installIpc() {
   ipcMain.handle('sources:set-active', async (_event, payload) => productRepository.setActiveSources(payload));
   ipcMain.handle('sources:remove', async (_event, id) => removeProjectSource(id));
   ipcMain.handle('sources:pending-checkpoints', async () => productRepository.listPendingCheckpoints());
-  ipcMain.handle('sources:resolve-checkpoint', async (_event, payload) => productRepository.resolveSourceCheckpoint(payload));
+  ipcMain.handle('sources:resolve-checkpoint', async (_event, payload) => resolveProjectSourceCheckpoint(payload));
   ipcMain.handle('sources:refresh-integrity', async (_event, id) => refreshProjectSource(id));
   ipcMain.handle('sources:accept-revision', async (_event, id) => acceptProjectSourceRevision(id));
   ipcMain.handle('sources:verify', async (_event, payload) => verifyProjectSource(payload));

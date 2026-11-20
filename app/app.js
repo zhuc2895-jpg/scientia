@@ -17,6 +17,7 @@ import {
   normalizeResearchStageState,
   reopenResearchStage,
 } from './research-stages.js';
+import { sourceCheckpointPrompt } from './checkpoint-presentation.js';
 import {
   buildRunContinuationPrompt,
   canContinueRecoveredRun,
@@ -2304,12 +2305,7 @@ async function recoverPendingSourceCheckpoints() {
   if (typeof bridge.sourcePendingCheckpoints !== 'function') return;
   const pending = await bridge.sourcePendingCheckpoints();
   for (const checkpoint of pending) {
-    const revision = checkpoint.type === 'source-revision-accepted';
-    const approved = window.confirm(
-      revision
-        ? 'An interrupted Source revision decision was found. Accept the observed revision now?'
-        : 'An interrupted Source removal decision was found. Remove the Source Record now?',
-    );
+    const approved = window.confirm(sourceCheckpointPrompt(checkpoint));
     const productState = await bridge.sourceResolveCheckpoint({
       id: checkpoint.id,
       decision: approved ? 'approved' : 'cancelled',

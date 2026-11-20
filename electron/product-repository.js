@@ -30,6 +30,7 @@ import {
   normalizeSourceUrl,
   normalizeSourceYear,
   stableIdentifierForSource,
+  sourceMetadataIsResolved,
 } from '../app/source-library.js';
 
 const ACTIVE_PROJECT_KEY = 'active_project_id';
@@ -41,6 +42,8 @@ const WORKSPACE_KINDS = new Set(['managed', 'imported']);
 const SOURCE_KINDS = new Set(['pdf', 'markdown', 'tex', 'bibtex', 'ris', 'doi', 'url']);
 const VERIFICATION_STATES = new Set(['verified', 'partial', 'unverified']);
 const FRESHNESS_STATES = new Set(['current', 'stale']);
+const SOURCE_CHECKPOINT_TYPES = new Set(['source-revision-accepted', 'source-removal']);
+const SOURCE_CHECKPOINT_DECISIONS = new Set(['approved', 'cancelled']);
 
 function parseJsonObject(value) {
   try {
@@ -49,6 +52,25 @@ function parseJsonObject(value) {
   } catch {
     return {};
   }
+}
+
+function sourceMetadataResolved(row) {
+  let authors = [];
+  try {
+    const parsed = JSON.parse(row?.authors_json || '[]');
+    if (Array.isArray(parsed)) authors = parsed.filter(Boolean);
+  } catch {
+    authors = [];
+  }
+  return sourceMetadataIsResolved({
+    title: row?.title,
+    authors,
+    year: row?.year,
+    venue: row?.venue,
+    doi: row?.doi,
+    url: row?.url,
+    stableIdentifier: row?.stable_identifier,
+  });
 }
 
 function deserializeSource(row) {
@@ -871,7 +893,9 @@ export function openProductRepository({ databasePath }) {
   }
 
   function listPendingCheckpointRecords() {
-    return listCheckpointRecords().filter((checkpoint) => checkpoint.decision === 'pending');
+    return listCheckpointRecords().filter(
+      (checkpoint) => checkpoint.decision === 'pending' && SOURCE_CHECKPOINT_TYPES.has(checkpoint.type),
+    );
   }
 
   function resolveSourceCheckpointRecord({ id, decision, rationale } = {}) {
@@ -881,12 +905,14 @@ export function openProductRepository({ databasePath }) {
     if (!existing) throw new Error('无法处理不存在的 Checkpoint。');
     if (existing.decision !== 'pending') throw new Error('Checkpoint 已经处理。');
     const type = existing.type;
-    if (!['source-revision-accepted', 'source-removal'].includes(type)) {
+    if (!SOURCE_CHECKPOINT_TYPES.has(type)) {
       throw new Error('该 Checkpoint 不是 Source 变更决策。');
     }
     const normalizedDecision = typeof decision === 'string' ? decision.trim() : '';
     const normalizedRationale = typeof rationale === 'string' ? rationale.trim() : '';
-    if (!normalizedDecision || !normalizedRationale) throw new Error('Checkpoint 决定和理由不能为空。');
+    if (!SOURCE_CHECKPOINT_DECISIONS.has(normalizedDecision) || !normalizedRationale) {
+      throw new Error('Source Checkpoint 决定必须是 approved 或 cancelled，并提供理由。');
+    }
     const normalizedMetadata = parseJsonObject(existing.metadata_json);
     const sourceId = String(normalizedMetadata.sourceId || '').trim();
     const timestamp = new Date().toISOString();
@@ -1176,6 +1202,9 @@ export function openProductRepository({ databasePath }) {
     if (verificationState === 'verified' && current.freshness_state === 'stale') {
       throw new Error('过期 Source Record 必须先刷新内容，不能直接标记为 verified。');
     }
+    if (verificationState === 'verified' && !sourceMetadataResolved(current)) {
+      throw new Error('Source 元数据尚未解析完整，不能标记为 verified。');
+    }
     let metadata = parseJsonObject(current.metadata_json);
     if (verificationState === 'verified') {
       if (!verification || typeof verification !== 'object' || Array.isArray(verification)) {
@@ -1189,30 +1218,44 @@ export function openProductRepository({ databasePath }) {
       if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Source 验证内容哈希无效。');
       const currentHash = current.observed_content_hash || current.content_hash;
       if (contentHash !== currentHash) throw new Error('Source 内容哈希已变化，必须重新核验。');
+      const record = {
+        locator,
+        quote,
+        claim,
+        contentHash,
+        verifiedAt: typeof verification.verifiedAt === 'string' && !Number.isNaN(Date.parse(verification.verifiedAt))
+          ? new Date(verification.verifiedAt).toISOString()
+          : new Date().toISOString(),
+      };
+      const verifications = Array.isArray(metadata.verifications)
+        ? metadata.verifications.filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+        : [];
+      const duplicate = verifications.some((item) => (
+        String(item.locator || '').trim().toLowerCase() === locator.toLowerCase()
+        && String(item.quote || '').replace(/\s+/g, ' ').trim() === quote
+        && String(item.claim || '').replace(/\s+/g, ' ').trim() === claim
+        && String(item.contentHash || '').trim().toLowerCase() === contentHash
+      ));
       metadata = {
         ...metadata,
-        verification: {
-          locator,
-          quote,
-          claim,
-          contentHash,
-          verifiedAt: typeof verification.verifiedAt === 'string' && !Number.isNaN(Date.parse(verification.verifiedAt))
-            ? new Date(verification.verifiedAt).toISOString()
-            : new Date().toISOString(),
-        },
+        verification: record,
+        verifications: duplicate ? verifications : [...verifications, record],
       };
     }
     updateSourceVerification.run(verificationState, JSON.stringify(metadata), id, project.id);
     return loadState();
   }
 
-  function refreshSourceIntegrity({ id, contentHash } = {}) {
+  function refreshSourceIntegrity({ id, contentHash, observedRevisionLocator = null } = {}) {
     assertOpen();
     const project = assertActiveProject();
     const current = selectSourceForProject.get(id, project.id);
     if (!current) throw new Error('Source Record 不存在或不属于当前 Research Project。');
     const normalizedHash = typeof contentHash === 'string' ? contentHash.trim().toLowerCase() : '';
     if (!/^[a-f0-9]{64}$/.test(normalizedHash)) throw new Error('Source content hash 无效。');
+    const normalizedRevisionLocator = typeof observedRevisionLocator === 'string' && observedRevisionLocator.trim()
+      ? observedRevisionLocator.trim().replace(/\\/g, '/')
+      : null;
     const baseLocator = current.local_locator.split('#')[0];
     const dependentSources = selectSources.all(project.id).filter(
       (source) => source.local_locator.split('#')[0] === baseLocator,
@@ -1233,6 +1276,7 @@ export function openProductRepository({ databasePath }) {
         const metadata = parseJsonObject(source.metadata_json);
         const observedChanged = normalizedHash !== (source.observed_content_hash || source.content_hash);
         if (changed && observedChanged) metadata.evidenceInvalidBefore = timestamp;
+        if (changed && normalizedRevisionLocator) metadata.observedRevisionLocator = normalizedRevisionLocator;
         updateSourceIntegrity.run(
           normalizedHash,
           changed ? 'stale' : 'current',

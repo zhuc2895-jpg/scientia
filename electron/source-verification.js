@@ -3,10 +3,17 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { inflateSync } from 'node:zlib';
 
+import { sourceMetadataIsResolved } from '../app/source-library.js';
 import { isWithin } from './path-boundary.js';
 
 function normalizedText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function assertResolvedSourceMetadata(source) {
+  if (!sourceMetadataIsResolved(source)) {
+    throw new Error('Source 元数据尚未解析完整，不能标记为 verified。');
+  }
 }
 
 function lineRange(locator, lineCount) {
@@ -94,6 +101,7 @@ export async function verifySourceEvidence({
   if (!source || typeof source.localLocator !== 'string' || !source.localLocator.trim()) {
     throw new Error('Source Record 缺少本地定位。');
   }
+  assertResolvedSourceMetadata(source);
   const normalizedLocator = String(locator || '').trim();
   const normalizedQuote = normalizedText(quote);
   const normalizedClaim = String(claim || '').replace(/\s+/g, ' ').trim();
@@ -106,7 +114,9 @@ export async function verifySourceEvidence({
   const relativeLocator = source.localLocator.split('#')[0];
   const sourcePath = path.resolve(workspacePath, relativeLocator);
   if (!isWithin(workspacePath, sourcePath)) throw new Error('Source local locator 不在当前 Research Workspace 中。');
-  const bytes = await fs.readFile(sourcePath);
+  const [realWorkspace, realSource] = await Promise.all([fs.realpath(workspacePath), fs.realpath(sourcePath)]);
+  if (!isWithin(realWorkspace, realSource)) throw new Error('Source local locator 指向当前 Research Workspace 之外。');
+  const bytes = await fs.readFile(realSource);
   const contentHash = createHash('sha256').update(bytes).digest('hex');
   const expectedHash = String(source.observedContentHash || source.contentHash || '').toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(expectedHash)) throw new Error('Source Record 缺少内容哈希。');

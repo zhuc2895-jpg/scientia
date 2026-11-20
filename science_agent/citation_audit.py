@@ -43,7 +43,8 @@ def _doi(value: Any) -> str | None:
 
 
 def _source_allowed(source: dict[str, Any]) -> bool:
-    return source.get("freshnessState") != "stale" and source.get("verificationState") != "unverified"
+    verification_state = source.get("verificationState")
+    return source.get("freshnessState") != "stale" and verification_state in (None, "verified")
 
 
 def _source_surnames(source: dict[str, Any]) -> set[str]:
@@ -106,10 +107,21 @@ def _reference_matches_source(reference: str, source: dict[str, Any]) -> bool:
     return False
 
 
-def _authorized(reference: str, active_sources: list[dict[str, Any]], registered_sources: list[dict[str, Any]]) -> bool:
-    return any(_reference_matches_source(reference, source) for source in active_sources) and any(
-        _reference_matches_source(reference, source) for source in registered_sources
+def _matches_any_source(
+    reference: str,
+    sources: list[dict[str, Any]],
+    evidence_entry: dict[str, Any] | None = None,
+) -> bool:
+    return any(
+        _reference_matches_source(reference, source)
+        and (evidence_entry is None or _evidence_survives_source_revision(evidence_entry, source))
+        for source in sources
+        if isinstance(source, dict)
     )
+
+
+def _authorized(reference: str, active_sources: list[dict[str, Any]], registered_sources: list[dict[str, Any]]) -> bool:
+    return _matches_any_source(reference, active_sources) and _matches_any_source(reference, registered_sources)
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -121,7 +133,31 @@ def _parse_timestamp(value: Any) -> datetime | None:
         return None
 
 
+def _verification_records(source: dict[str, Any]) -> list[dict[str, Any]]:
+    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+    records = metadata.get("verifications")
+    result = [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
+    if isinstance(metadata.get("verification"), dict):
+        result.append(metadata["verification"])
+    return result
+
+
 def _evidence_survives_source_revision(entry: dict[str, Any], source: dict[str, Any]) -> bool:
+    if source.get("verificationState") == "verified":
+        locator = str(entry.get("locator") or "").strip().lower()
+        quote = re.sub(r"\s+", " ", str(entry.get("quote") or "")).strip()
+        claim = re.sub(r"\s+", " ", str(entry.get("claim") or "")).strip()
+        source_hash = str(entry.get("sourceContentHash") or "").strip().lower()
+        current_hash = str(source.get("observedContentHash") or source.get("contentHash") or "").strip().lower()
+        if not locator or not quote or not claim or not source_hash or source_hash != current_hash:
+            return False
+        return any(
+            locator == str(record.get("locator") or "").strip().lower()
+            and quote == re.sub(r"\s+", " ", str(record.get("quote") or "")).strip()
+            and claim == re.sub(r"\s+", " ", str(record.get("claim") or "")).strip()
+            and source_hash == str(record.get("contentHash") or "").strip().lower()
+            for record in _verification_records(source)
+        )
     metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
     cutoff = _parse_timestamp(metadata.get("evidenceInvalidBefore") or source.get("evidenceInvalidBefore"))
     if cutoff is None:
@@ -138,14 +174,9 @@ def _evidence_entry_authorized(
     reference = entry.get("source")
     if not isinstance(reference, str) or not reference.strip():
         return False
-    def matches(sources: list[dict[str, Any]]) -> bool:
-        return any(
-            _reference_matches_source(reference, source)
-            and _evidence_survives_source_revision(entry, source)
-            for source in sources
-            if isinstance(source, dict)
-        )
-    return matches(active_sources) and matches(registered_sources)
+    return _matches_any_source(reference, active_sources, entry) and _matches_any_source(
+        reference, registered_sources, entry
+    )
 
 
 def _number_set(value: str) -> set[int]:
@@ -185,16 +216,24 @@ def _source_identity(source: dict[str, Any]) -> str:
 def _bibliography_entry_matches_source(entry: str, source: dict[str, Any]) -> bool:
     if not isinstance(source, dict) or not _source_allowed(source):
         return False
-    normalized_entry = re.sub(r"\s+(?:19|20)\d{2}[a-z]?\s*$", "", _normalized_title(entry))
-    title = _normalized_title(source.get("title"))
-    if title and normalized_entry == title:
-        return True
+    source_doi = _doi(source.get("doi") or source.get("stableIdentifier"))
+    entry_doi = _doi(entry)
+    if entry_doi:
+        return bool(source_doi and entry_doi == source_doi)
     source_url = _normalized_url(source.get("url"))
     if source_url:
         for url_match in re.findall(r"https?://[^\s<>`\"']+", entry, flags=re.IGNORECASE):
             if _normalized_url(url_match.rstrip(".,;)")) == source_url:
                 return True
-    for key in ("doi", "citekey", "stableIdentifier"):
+    title = _normalized_title(source.get("title"))
+    if title:
+        segments = [_normalized_title(segment) for segment in re.split(r"[.;]\s*", entry)]
+        if title in segments:
+            return True
+        normalized_entry = re.sub(r"\s+(?:19|20)\d{2}[a-z]?\s*$", "", _normalized_title(entry))
+        if normalized_entry == title:
+            return True
+    for key in ("citekey", "stableIdentifier"):
         token = str(source.get(key) or "").strip()
         if token.startswith(("http://", "https://")):
             continue
@@ -212,23 +251,16 @@ def _evidence_matching_sources(
     reference = entry.get("source")
     if not isinstance(reference, str) or not reference.strip():
         return []
-    active_matches = [
-        source for source in active_sources
+    matches = [
+        source for source in registered_sources
         if isinstance(source, dict)
         and _reference_matches_source(reference, source)
         and _evidence_survives_source_revision(entry, source)
     ]
-    registered_keys = {
-        _source_identity(source)
-        for source in registered_sources
-        if isinstance(source, dict)
-        and _reference_matches_source(reference, source)
-        and _evidence_survives_source_revision(entry, source)
-    }
     unique = {}
-    for source in active_matches:
+    for source in matches:
         unique.setdefault(_source_identity(source), source)
-    return [source for key, source in unique.items() if key in registered_keys]
+    return list(unique.values())
 
 
 def _out_of_boundary_evidence(
@@ -301,11 +333,10 @@ def audit_citations(
         latex = LATEX_RE.fullmatch(cleaned.strip())
         if latex:
             keys = [key.strip().lower() for key in latex.group(1).split(",") if key.strip()]
-            active_keys = {str(source.get("citekey") or "").lower() for source in active_sources if _source_allowed(source)}
             registered_keys = {
                 str(source.get("citekey") or "").lower() for source in registered_sources if _source_allowed(source)
             }
-            if any(key not in active_keys or key not in registered_keys for key in keys):
+            if any(key not in registered_keys for key in keys):
                 forbidden.append(cleaned)
             continue
         if not _authorized(cleaned, active_sources, registered_sources):

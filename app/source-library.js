@@ -136,12 +136,30 @@ export function buildSourceRevisionCheckpointMetadata(source = {}) {
     sourceId: String(source.id || ''),
     title: String(source.title || ''),
     observedContentHash: String(source.observedContentHash || ''),
+    ...((source.observedRevisionLocator || source.metadata?.observedRevisionLocator)
+      ? { observedRevisionLocator: String(source.observedRevisionLocator || source.metadata.observedRevisionLocator) }
+      : {}),
     trigger: 'The Source content changed and the observed revision must be accepted.',
     risk: 'Accepted content invalidates prior Evidence and requires re-verification before citation.',
     options: ['Accept the observed Source revision', 'Cancel and keep the previous version stale'],
     recommendation: 'Accept only if the new content is the intended source, then verify it before citation.',
     estimatedTimeCost: 'Local metadata update; seconds, no model cost.',
   };
+}
+
+export function sourceMetadataIsResolved(source = {}) {
+  const title = String(source.title || '').replace(/\s+/g, ' ').trim();
+  const authors = Array.isArray(source.authors) ? source.authors.filter(Boolean) : [];
+  const venue = String(source.venue || '').trim();
+  const year = Number(source.year);
+  const identities = [source.doi, source.url, source.stableIdentifier]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  const placeholderTitle = !title
+    || identities.some((identity) => identity.toLowerCase() === title.toLowerCase())
+    || /^(?:doi:|https?:\/\/)/i.test(title)
+    || /^DOI\s+10\./i.test(title);
+  return !placeholderTitle && (authors.length > 0 || venue) && Number.isInteger(year) && year >= 1000 && year <= 2200;
 }
 
 export function buildBibTeXKey(source = {}) {

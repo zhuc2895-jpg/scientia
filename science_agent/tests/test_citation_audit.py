@@ -138,5 +138,107 @@ class CitationAuditTests(unittest.TestCase):
         self.assertEqual(result["outOfBoundaryCitations"], ["[1]"])
 
 
+    def test_evidence_must_match_a_verified_locator_quote_claim_and_content_hash(self) -> None:
+        source = {
+            "id": "source-1",
+            "localLocator": ".science/sources/paper.md",
+            "contentHash": "a" * 64,
+            "observedContentHash": "a" * 64,
+            "verificationState": "verified",
+            "metadata": {
+                "verification": {
+                    "locator": "line:3",
+                    "quote": "The intervention reduced error.",
+                    "claim": "The intervention reduced error.",
+                    "contentHash": "a" * 64,
+                },
+            },
+        }
+        matching = audit_citations(
+            text="Claim [1]. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[{
+                "source": "paper.md",
+                "citationNumber": 1,
+                "locator": "line:3",
+                "quote": "The intervention reduced error.",
+                "claim": "The intervention reduced error.",
+                "sourceContentHash": "a" * 64,
+            }],
+        )
+        self.assertEqual(matching["outOfBoundaryCitations"], [])
+        old_version = audit_citations(
+            text="Claim [1]. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[{
+                "source": "paper.md",
+                "citationNumber": 1,
+                "locator": "line:3",
+                "quote": "The intervention reduced error.",
+                "claim": "The intervention reduced error.",
+                "sourceContentHash": "b" * 64,
+                "addedAt": "2099-01-01T00:00:00Z",
+            }],
+        )
+        self.assertEqual(old_version["outOfBoundaryCitations"], ["[1]"])
+        unrelated_claim = audit_citations(
+            text="Claim [1]. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[{
+                "source": "paper.md",
+                "citationNumber": 1,
+                "locator": "line:3",
+                "quote": "The intervention reduced error.",
+                "claim": "An unrelated conclusion.",
+                "sourceContentHash": "a" * 64,
+            }],
+        )
+        self.assertEqual(unrelated_claim["outOfBoundaryCitations"], ["[1]"])
+
+    def test_bibliography_doi_requires_an_exact_boundary(self) -> None:
+        source = {
+            "id": "source-1",
+            "localLocator": ".science/sources/paper.md",
+            "title": "A Reproducible Trial",
+            "doi": "10.1000/abc",
+            "contentHash": "a" * 64,
+            "observedContentHash": "a" * 64,
+            "verificationState": "verified",
+            "metadata": {
+                "verification": {
+                    "locator": "line:3",
+                    "quote": "Supported result.",
+                    "claim": "The result is supported.",
+                    "contentHash": "a" * 64,
+                },
+            },
+        }
+        evidence = [{
+            "source": "paper.md",
+            "citationNumber": 1,
+            "locator": "line:3",
+            "quote": "Supported result.",
+            "claim": "The result is supported.",
+            "sourceContentHash": "a" * 64,
+        }]
+        prefix = audit_citations(
+            text="Claim [1]. Limitation: x.\nReferences\n[1] 10.1000/abc.1. 2024.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=evidence,
+        )
+        self.assertEqual(prefix["outOfBoundaryCitations"], ["[1]"])
+        formatted = audit_citations(
+            text="Claim [1]. Limitation: x.\nReferences\n[1] Smith, J. A Reproducible Trial. Journal of Tests. 2024.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=evidence,
+        )
+        self.assertEqual(formatted["outOfBoundaryCitations"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

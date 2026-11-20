@@ -188,9 +188,11 @@ test('source revision checkpoint carries the complete decision contract', () => 
     id: 'source-1',
     title: 'A Reproducible Trial',
     observedContentHash: 'b'.repeat(64),
+    metadata: { observedRevisionLocator: '.science/source-revisions/new.revision' },
   });
 
   assert.equal(metadata.sourceId, 'source-1');
+  assert.equal(metadata.observedRevisionLocator, '.science/source-revisions/new.revision');
   assert.match(metadata.trigger, /changed|变化/i);
   assert.match(metadata.risk, /Evidence/);
   assert.ok(metadata.options.length >= 2);

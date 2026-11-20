@@ -1300,6 +1300,61 @@ test('source verification requires locator, quote, claim, and current content ha
   assert.equal(verified.metadata.verification.contentHash, sourceRecord().contentHash);
 });
 
+test('source repository refuses verification without resolved metadata', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({
+    sources: [sourceRecord({
+      title: 'DOI 10.1000/placeholder',
+      authors: [],
+      year: null,
+      venue: '',
+      doi: '10.1000/placeholder',
+      stableIdentifier: 'doi:10.1000/placeholder',
+    })],
+  });
+  assert.throws(
+    () => repository.setSourceVerification({
+      id: 'source-1',
+      verificationState: 'verified',
+      verification: sourceVerification(),
+    }),
+    /元数据/,
+  );
+});
+
+test('source verification records accumulate independent evidence claims', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  repository.setSourceVerification({
+    id: 'source-1',
+    verificationState: 'verified',
+    verification: sourceVerification(),
+  });
+  const state = repository.setSourceVerification({
+    id: 'source-1',
+    verificationState: 'verified',
+    verification: {
+      locator: 'line:5',
+      quote: 'Second supported result.',
+      claim: 'The second result is supported.',
+      contentHash: 'a'.repeat(64),
+    },
+  });
+  assert.equal(state.sources[0].metadata.verifications.length, 2);
+});
+
 test('checkpoints can persist a pending decision before the dialog resolves', (t) => {
   const { directory, databasePath } = temporaryDatabase();
   const repository = openTestRepository(databasePath);
@@ -1402,10 +1457,46 @@ test('refreshing one record in a shared bibliography marks every dependent recor
       }),
     ],
   });
-  const state = repository.refreshSourceIntegrity({ id: 'source-1', contentHash: 'b'.repeat(64) });
+  const state = repository.refreshSourceIntegrity({
+    id: 'source-1',
+    contentHash: 'b'.repeat(64),
+    observedRevisionLocator: '.science/source-revisions/new.revision',
+  });
   for (const source of state.sources) {
     assert.equal(source.freshnessState, 'stale');
     assert.equal(source.observedContentHash, 'b'.repeat(64));
     assert.equal(source.verificationState, 'unverified');
+    assert.equal(source.metadata.observedRevisionLocator, '.science/source-revisions/new.revision');
   }
+});
+
+test('pending source checkpoints are filtered and accept only explicit decisions', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  repository.beginCheckpoint({
+    type: 'external-transmission',
+    rationale: 'Unrelated durable checkpoint.',
+    metadata: { trigger: 'External transmission', risk: 'Data leaves the machine' },
+  });
+  const pending = repository.beginCheckpoint({
+    type: 'source-removal',
+    rationale: 'Remove source.',
+    metadata: { sourceId: 'source-1', trigger: 'Remove source', risk: 'Evidence freeze' },
+  });
+  assert.deepEqual(repository.listPendingCheckpoints().map((checkpoint) => checkpoint.id), [pending.id]);
+  assert.throws(
+    () => repository.resolveSourceCheckpoint({
+      id: pending.id,
+      decision: 'accepted maybe',
+      rationale: 'Malformed decision.',
+    }),
+    /approved|declined|cancelled/i,
+  );
+  assert.equal(repository.listPendingCheckpoints()[0].id, pending.id);
 });

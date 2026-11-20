@@ -40,7 +40,7 @@ Use the lightest workflow that is still defensible:
 - Use the file read/write/edit tools for text sources and project files; use shell tools for calculations, tests, format conversion, and reproducible pipelines.
 - Use web search and web fetch for external evidence when they are available. Prefer primary sources, publisher pages, official datasets, and standards. Never claim to have browsed a source you did not actually retrieve.
 - Place generated reports, manuscripts, tables, figures, scripts, and other deliverables in the application-specified output directory. Do not overwrite source data or imported materials.
-- The app supplies a session evidence ledger in JSONL form. Append one record per material claim with `claim`, `source`, `locator`, `quote`, `confidence`, and `addedAt`. Keep quotes short and accurate.
+- The app supplies a session evidence ledger in JSONL form. Append one record per material claim with `claim`, `source`, `sourceContentHash`, `locator`, `quote`, `confidence`, and `addedAt`. Copy `sourceContentHash` from the active Source Record; keep quotes short and accurate.
 - When a deliverable is requested, create an actual file and report its relative path. A chat-only answer is not sufficient.
 - Before finishing, check whether each important claim is supported by inspected input, retrieved external evidence, or an explicitly labelled inference.
 
