@@ -17,6 +17,8 @@ from typing import Any
 import zipfile
 import zlib
 
+from science_agent.citation_audit import audit_citations
+
 IGNORED_DIRS = {".git", "node_modules", ".venv", "__pycache__", ".idea", ".vscode", "dist", "build"}
 HASH_LIMIT_BYTES = 32 * 1024 * 1024
 MAX_CONTEXT_FILES = 180
@@ -484,186 +486,6 @@ def _new_artifacts(output_dir: Path, workspace: Path, started_at: str) -> list[d
     return artifacts
 
 
-def _doi_from_reference(value: str) -> str | None:
-    match = re.search(r"(?:doi:\s*|doi\.org/)?(10\.\d{4,9}/\S+)", value, flags=re.IGNORECASE)
-    return match.group(1).rstrip(").,;").lower() if match else None
-
-
-def _author_year_components(value: str) -> tuple[int | None, set[str]]:
-    year_match = re.search(r"\b((?:19|20)\d{2})[a-z]?\b", value)
-    if not year_match:
-        return None, set()
-    prefix = value[:year_match.start()]
-    surnames = {
-        token.lower()
-        for token in re.findall(r"\b[A-Z][A-Za-z'’-]+\b", prefix)
-        if token.lower() not in {"et", "al", "and"}
-    }
-    return int(year_match.group(1)), surnames
-
-
-def _reference_matches_source(reference: str, source: dict[str, Any]) -> bool:
-    if source.get("freshnessState") == "stale" or source.get("verificationState") == "unverified":
-        return False
-    value = reference.strip().strip("'\"`").replace("\\", "/")
-    lowered = value.lower()
-    citation_year, citation_surnames = _author_year_components(value)
-    if citation_year and citation_surnames:
-        source_year = normalize_source_year(source.get("year")) if "normalize_source_year" in globals() else source.get("year")
-        if source_year != citation_year:
-            return False
-        source_surnames = set()
-        for author in source.get("authors") or []:
-            author_value = str(author or "").strip()
-            if not author_value:
-                continue
-            if "," in author_value:
-                source_surnames.add(author_value.split(",", 1)[0].strip().lower())
-            else:
-                source_surnames.add(author_value.split()[-1].lower())
-        return bool(citation_surnames) and citation_surnames.issubset(source_surnames)
-    source_url = str(source.get("url") or "").strip().rstrip("/").lower()
-    source_doi = _doi_from_reference(str(source.get("doi") or source.get("stableIdentifier") or ""))
-    reference_doi = _doi_from_reference(lowered)
-
-    if lowered.startswith(("http://", "https://")):
-        lowered_url = lowered.split("#", 1)[0].rstrip("/")
-        if source_url and lowered_url == source_url:
-            return True
-        return bool(reference_doi and source_doi and reference_doi == source_doi)
-    if reference_doi:
-        return bool(source_doi and reference_doi == source_doi)
-
-    reference_path = lowered.split("#", 1)[0].rstrip("/")
-    reference_basename = reference_path.rsplit("/", 1)[-1]
-    for key in ("localLocator", "stableIdentifier", "title"):
-        candidate = str(source.get(key) or "").strip().replace("\\", "/")
-        candidate_lower = candidate.lower().split("#", 1)[0].rstrip("/")
-        if not candidate_lower:
-            continue
-        if reference_path == candidate_lower:
-            return True
-        if "/" not in reference_path and reference_basename == candidate_lower.rsplit("/", 1)[-1]:
-            return True
-    return False
-
-
-def _is_authorized_reference(
-    reference: str,
-    active_sources: list[dict[str, Any]],
-    registered_sources: list[dict[str, Any]],
-) -> bool:
-    return (
-        any(_reference_matches_source(reference, source) for source in active_sources)
-        and any(_reference_matches_source(reference, source) for source in registered_sources)
-    )
-
-
-def _out_of_boundary_evidence(
-    entries: list[dict[str, Any]],
-    active_sources: list[dict[str, Any]],
-    registered_sources: list[dict[str, Any]],
-) -> list[str]:
-    unresolved: list[str] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        source = entry.get("source")
-        if isinstance(source, str) and source.strip() and not _is_authorized_reference(
-            source, active_sources, registered_sources
-        ):
-            unresolved.append(source)
-    return unresolved
-
-
-def _latex_citation_keys(value: str) -> list[str]:
-    match = re.match(
-        r"\\(?:cite|citep|citet|parencite|textcite)\*?(?:\[[^\]]*\])*\{([^}]+)\}",
-        value.strip(),
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return []
-    return [key.strip() for key in match.group(1).split(",") if key.strip()]
-
-
-def _numeric_bibliography_entries(value: str) -> dict[int, str]:
-    entries: dict[int, str] = {}
-    for line in value.splitlines():
-        match = re.match(r"\s*\[(\d+)\]\s+(.+)", line)
-        if match:
-            entries[int(match.group(1))] = match.group(2).strip()
-    return entries
-
-
-def _bibliography_entry_authorized(
-    entry: str,
-    active_sources: list[dict[str, Any]],
-    registered_sources: list[dict[str, Any]],
-) -> bool:
-    lowered = entry.lower()
-    def matches(sources: list[dict[str, Any]]) -> bool:
-        return any(
-            any(
-                token and token.lower() in lowered
-                for token in (
-                    source.get("title"),
-                    source.get("doi"),
-                    source.get("url"),
-                    source.get("citekey"),
-                    source.get("stableIdentifier"),
-                )
-            )
-            for source in sources
-            if isinstance(source, dict) and source.get("freshnessState") != "stale" and source.get("verificationState") != "unverified"
-        )
-    return matches(active_sources) and matches(registered_sources)
-
-
-def _out_of_boundary_citations(
-    result_text: str,
-    active_sources: list[dict[str, Any]],
-    registered_sources: list[dict[str, Any]],
-    *,
-    authorized_citation_numbers: set[int] | None = None,
-) -> list[str]:
-    citations = re.findall(
-        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|\b10\.\d{4,9}/[^\s<>()]+|\[[0-9]+(?:\s*[,–-]\s*[0-9]+)*\]|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)|[A-Z][A-Za-z'’-]+(?:\s+et al\.)?\s+\((?:19|20)\d{2}[a-z]?\)|\\(?:cite|citep|citet|parencite|textcite)\*?\s*(?:\[[^\]]*\]\s*)*\{[^}]+\}|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
-        result_text,
-        flags=re.IGNORECASE,
-    )
-    unresolved: list[str] = []
-    bibliography_entries = _numeric_bibliography_entries(result_text)
-    for citation in citations:
-        cleaned = citation.rstrip(".,;")
-        if cleaned.lower().startswith(("http://", "https://")):
-            while cleaned.endswith(")") and cleaned.count(")") > cleaned.count("("):
-                cleaned = cleaned[:-1]
-        if re.fullmatch(r"\[[0-9]+(?:\s*[,–-]\s*[0-9]+)*\]", cleaned):
-            numbers = [int(value) for value in re.findall(r"\d+", cleaned)]
-            allowed_numbers = authorized_citation_numbers or set()
-            for number in numbers:
-                bibliography_entry = bibliography_entries.get(number)
-                if bibliography_entry:
-                    if not _bibliography_entry_authorized(bibliography_entry, active_sources, registered_sources):
-                        unresolved.append(cleaned)
-                        break
-                elif number not in allowed_numbers:
-                    unresolved.append(cleaned)
-                    break
-            continue
-        latex_keys = _latex_citation_keys(cleaned)
-        if latex_keys:
-            active_keys = {str(source.get("citekey") or "").lower() for source in active_sources if isinstance(source, dict)}
-            registered_keys = {str(source.get("citekey") or "").lower() for source in registered_sources if isinstance(source, dict)}
-            if any(key.lower() not in active_keys or key.lower() not in registered_keys for key in latex_keys):
-                unresolved.append(cleaned)
-            continue
-        if not _is_authorized_reference(cleaned, active_sources, registered_sources):
-            unresolved.append(cleaned)
-    return unresolved
-
-
 def _artifact_audit_text(workspace: Path, artifacts: list[dict[str, Any]]) -> str:
     chunks: list[str] = []
     text_suffixes = {".md", ".txt", ".tex", ".csv", ".json", ".html", ".htm", ".yaml", ".yml"}
@@ -708,11 +530,13 @@ def assess_result(
     audit_text: str | None = None,
 ) -> dict[str, Any]:
     text = result_text or ""
-    citation_count = len(re.findall(
-        r"https?://|doi:\s*10\.\d{4,9}/\S+|\[[0-9]+(?:\s*[,–-]\s*[0-9]+)*\]|`[^`]+\.(?:pdf|md|csv|py|ipynb)",
-        text,
-        flags=re.IGNORECASE,
-    ))
+    preliminary_audit = audit_citations(
+        text=text,
+        active_sources=active_sources or [],
+        registered_sources=registered_sources or [],
+        evidence_entries=evidence_entries if evidence_entries is not None else new_evidence_entries or [],
+    )
+    citation_count = preliminary_audit["citationCount"]
     has_uncertainty = any(word.lower() in text.lower() for word in UNCERTAINTY_WORDS)
     needs_deliverable = any(word.lower() in prompt.lower() for word in DELIVERABLE_WORDS)
     checks = [
@@ -746,28 +570,21 @@ def assess_result(
     out_of_boundary_evidence: list[str] = []
     out_of_boundary_citations: list[str] = []
     if active_sources is not None:
-        out_of_boundary_evidence = _out_of_boundary_evidence(
-            new_evidence_entries or [], active_sources, registered_sources or []
-        )
         all_evidence = evidence_entries if evidence_entries is not None else (new_evidence_entries or [])
-        authorized_evidence = bool(all_evidence) and not _out_of_boundary_evidence(
-            all_evidence, active_sources, registered_sources or []
+        citation_audit = audit_citations(
+            text=audit_text if audit_text is not None else text,
+            active_sources=active_sources,
+            registered_sources=registered_sources or [],
+            evidence_entries=all_evidence,
         )
-        authorized_citation_numbers: set[int] = set()
-        if authorized_evidence:
-            for entry in all_evidence:
-                try:
-                    citation_number = int(entry.get("citationNumber"))
-                except (AttributeError, TypeError, ValueError):
-                    continue
-                if citation_number > 0:
-                    authorized_citation_numbers.add(citation_number)
-        out_of_boundary_citations = _out_of_boundary_citations(
-            audit_text if audit_text is not None else text,
-            active_sources,
-            registered_sources or [],
-            authorized_citation_numbers=authorized_citation_numbers,
+        new_evidence_audit = audit_citations(
+            text="",
+            active_sources=active_sources,
+            registered_sources=registered_sources or [],
+            evidence_entries=new_evidence_entries or [],
         )
+        out_of_boundary_evidence = new_evidence_audit["outOfBoundaryEvidenceSources"]
+        out_of_boundary_citations = citation_audit["outOfBoundaryCitations"]
         boundary_violation = bool(out_of_boundary_evidence or out_of_boundary_citations)
         checks.append({
             "id": "source-boundary",

@@ -2129,7 +2129,7 @@ function bindEvents() {
   els.sourceList.addEventListener('click', async (event) => {
     const verifyButton = event.target.closest('[data-verify-source]');
     if (verifyButton) {
-      const locator = window.prompt('输入可定位的页码、章节或行号：');
+      const locator = window.prompt('输入来源定位（文本用 line:<行号>，PDF 用 page:<页码>）：');
       if (!locator) return;
       const quote = window.prompt('输入支持主张的短引文：');
       if (!quote) return;
@@ -2300,6 +2300,27 @@ async function recoverActiveProjectRuns() {
   }
 }
 
+async function recoverPendingSourceCheckpoints() {
+  if (typeof bridge.sourcePendingCheckpoints !== 'function') return;
+  const pending = await bridge.sourcePendingCheckpoints();
+  for (const checkpoint of pending) {
+    const revision = checkpoint.type === 'source-revision-accepted';
+    const approved = window.confirm(
+      revision
+        ? 'An interrupted Source revision decision was found. Accept the observed revision now?'
+        : 'An interrupted Source removal decision was found. Remove the Source Record now?',
+    );
+    const productState = await bridge.sourceResolveCheckpoint({
+      id: checkpoint.id,
+      decision: approved ? 'approved' : 'cancelled',
+      rationale: approved
+        ? `User completed the interrupted ${checkpoint.type} checkpoint after restart.`
+        : `User declined the interrupted ${checkpoint.type} checkpoint after restart.`,
+    });
+    applyProductState(productState);
+  }
+}
+
 async function init() {
   els.evidenceToggle.classList.toggle('active', state.evidenceMode);
   els.evidenceToggle.setAttribute('aria-pressed', String(state.evidenceMode));
@@ -2320,6 +2341,7 @@ async function init() {
   try {
     const productState = await initializeProductState();
     applyProductState(productState);
+    await recoverPendingSourceCheckpoints();
     await recoverActiveProjectRuns();
   } catch (error) {
     showToast(error.message || '无法读取本地会话。', 5000);
@@ -2654,6 +2676,8 @@ function createPreviewBridge() {
       if (conversation) conversation.activeSourceIds = [...sourceIds];
       return previewProductState();
     },
+    async sourcePendingCheckpoints() { return []; },
+    async sourceResolveCheckpoint() { return previewProductState(); },
     async sourceRefreshIntegrity(id) {
       const source = previewSources.find((item) => item.id === id);
       if (source) source.freshnessState = 'current';

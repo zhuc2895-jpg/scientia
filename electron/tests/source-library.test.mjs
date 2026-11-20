@@ -204,3 +204,10 @@ test('generated BibTeX keys distinguish titles sharing author and year', () => {
   const second = buildBibTeXKey({ ...base, title: 'Alpha results' });
   assert.notEqual(first, second);
 });
+
+test('generated BibTeX keys resist reviewed collision pair', () => {
+  const base = { authors: ['Jane Source'], year: 2024 };
+  const first = buildBibTeXKey({ ...base, title: 'Alpha 39708' });
+  const second = buildBibTeXKey({ ...base, title: 'Alpha 58215' });
+  assert.notEqual(first, second);
+});

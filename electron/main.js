@@ -22,6 +22,7 @@ import { createResearchProjectLifecycle } from './research-project-lifecycle.js'
 import { researchCharterContentString, researchCharterFieldsEqual } from '../app/research-charter.js';
 import { evaluateResearchRunPolicy } from '../app/research-run-policy.js';
 import { fetchSourceContent, ingestReference, ingestSourceFiles } from './source-ingestion.js';
+import { verifySourceEvidence } from './source-verification.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'deepseek-v4-flash';
 const DEFAULT_MAX_TOKENS = 49152;
@@ -471,36 +472,34 @@ async function acceptProjectSourceRevision(id) {
     noLink: true,
   });
   const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
-  productRepository.resolveCheckpoint({
+  const nextState = productRepository.resolveSourceCheckpoint({
     id: pendingCheckpoint.id,
     decision,
     rationale: decision === 'approved'
       ? 'User accepted the observed Source revision.'
       : 'User cancelled accepting the observed Source revision.',
-    metadata: checkpointMetadata,
   });
   if (decision !== 'approved') throw new Error('User cancelled Source revision acceptance.');
-  return productRepository.acceptSourceRevision({ id, contentHash });
+  return nextState;
 }
 
 async function verifyProjectSource({ id, locator, quote, claim } = {}) {
   const source = productRepository.getSource(id);
   if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
-  const normalizedLocator = String(locator || '').trim();
-  const normalizedQuote = String(quote || '').trim();
-  const normalizedClaim = String(claim || '').trim();
-  if (!normalizedLocator || !normalizedQuote || !normalizedClaim) {
-    throw new Error('验证 Source 需要定位、短引文和支持主张。');
-  }
+  const verification = await verifySourceEvidence({
+    workspacePath: currentProjectWorkspace(),
+    source,
+    locator,
+    quote,
+    claim,
+  });
   productRepository.recordCheckpoint({
     type: 'source-verification',
     decision: 'approved',
-    rationale: 'User supplied locating evidence and accepted the limited claim.',
+    rationale: 'The application matched the supplied quotation at the locator and bound it to the current content hash.',
     metadata: {
       sourceId: id,
-      locator: normalizedLocator,
-      quote: normalizedQuote,
-      claim: normalizedClaim,
+      ...verification,
       trigger: 'User requested Source verification.',
       risk: 'Verification affects whether this Source may support cited claims.',
       options: ['Verify Source', 'Leave Source unverified'],
@@ -508,7 +507,11 @@ async function verifyProjectSource({ id, locator, quote, claim } = {}) {
       estimatedTimeCost: 'Local review; no model cost.',
     },
   });
-  return productRepository.setSourceVerification({ id, verificationState: 'verified' });
+  return productRepository.setSourceVerification({
+    id,
+    verificationState: 'verified',
+    verification,
+  });
 }
 
 async function removeProjectSource(id) {
@@ -531,16 +534,14 @@ async function removeProjectSource(id) {
     noLink: true,
   });
   const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
-  productRepository.resolveCheckpoint({
+  const nextState = productRepository.resolveSourceCheckpoint({
     id: pendingCheckpoint.id,
     decision,
     rationale: decision === 'approved'
       ? 'User approved removing a Source Record from the Project Source Library.'
       : 'User cancelled removing a Source Record from the Project Source Library.',
-    metadata: checkpointMetadata,
   });
   if (decision !== 'approved') throw new Error('User cancelled Source Record removal.');
-  const nextState = productRepository.removeSource(id);
   return nextState;
 }
 
@@ -935,6 +936,8 @@ function installIpc() {
   ipcMain.handle('sources:import-reference', async (_event, payload) => importSourceReference(payload));
   ipcMain.handle('sources:set-active', async (_event, payload) => productRepository.setActiveSources(payload));
   ipcMain.handle('sources:remove', async (_event, id) => removeProjectSource(id));
+  ipcMain.handle('sources:pending-checkpoints', async () => productRepository.listPendingCheckpoints());
+  ipcMain.handle('sources:resolve-checkpoint', async (_event, payload) => productRepository.resolveSourceCheckpoint(payload));
   ipcMain.handle('sources:refresh-integrity', async (_event, id) => refreshProjectSource(id));
   ipcMain.handle('sources:accept-revision', async (_event, id) => acceptProjectSourceRevision(id));
   ipcMain.handle('sources:verify', async (_event, payload) => verifyProjectSource(payload));

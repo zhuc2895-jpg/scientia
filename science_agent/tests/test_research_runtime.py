@@ -360,6 +360,21 @@ class ResearchRuntimeTests(unittest.TestCase):
         self.assertTrue(compact_numbers["blocking"])
         self.assertEqual(compact_numbers["outOfBoundaryCitations"], ["[1, 2]"])
 
+        range_numbers = assess_result(
+            "Claim [1-3]. Limitation: x.",
+            "Cite.",
+            [],
+            1,
+            new_evidence_entries=[
+                {"source": "paper.md", "citationNumber": 1},
+                {"source": "paper.md", "citationNumber": 3},
+            ],
+            registered_sources=bibliography_source,
+            active_sources=bibliography_source,
+        )
+        self.assertTrue(range_numbers["blocking"])
+        self.assertEqual(range_numbers["outOfBoundaryCitations"], ["[1-3]"])
+
         latex_source = [{
             "localLocator": ".science/sources/paper.md",
             "citekey": "smith2024",

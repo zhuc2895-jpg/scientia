@@ -898,6 +898,41 @@ test('approved Research Charter revisions survive repository restart for later r
   assert.equal(project.charter.approved.citationStyle, 'APA 7');
 });
 
+function resolveSourceRemoval(repository, id) {
+  const pending = repository.beginCheckpoint({
+    type: 'source-removal',
+    rationale: 'Remove the source record.',
+    metadata: { sourceId: id },
+  });
+  return repository.resolveSourceCheckpoint({
+    id: pending.id,
+    decision: 'approved',
+    rationale: 'User approved Source removal.',
+  });
+}
+
+function resolveSourceRevision(repository, id, contentHash) {
+  const pending = repository.beginCheckpoint({
+    type: 'source-revision-accepted',
+    rationale: 'Accept the observed revision.',
+    metadata: { sourceId: id, observedContentHash: contentHash },
+  });
+  return repository.resolveSourceCheckpoint({
+    id: pending.id,
+    decision: 'approved',
+    rationale: 'User accepted the observed revision.',
+  });
+}
+
+function sourceVerification(contentHash = 'a'.repeat(64)) {
+  return {
+    locator: 'line:3',
+    quote: 'Supported result.',
+    claim: 'The result is supported.',
+    contentHash,
+  };
+}
+
 function sourceRecord(overrides = {}) {
   return {
     id: 'source-1',
@@ -1169,7 +1204,7 @@ test('removing a source clears active sets and revokes Evidence Freeze', (t) => 
   repository.completeResearchStage('evidence');
   assert.equal(repository.loadState().project.stageGraph.currentStageKey, 'inquiry');
 
-  const state = repository.removeSource('source-1');
+  const state = resolveSourceRemoval(repository, 'source-1');
   assert.equal(state.sources.some((source) => source.id === 'source-1'), false);
   assert.deepEqual(
     state.conversations.find((item) => item.id === activeConversation.id).activeSourceIds,
@@ -1187,7 +1222,7 @@ test('source integrity refresh marks changed content stale and revokes Evidence 
   });
 
   repository.registerSources({ sources: [sourceRecord()] });
-  repository.setSourceVerification({ id: 'source-1', verificationState: 'verified' });
+  repository.setSourceVerification({ id: 'source-1', verificationState: 'verified', verification: sourceVerification() });
   assert.equal(repository.getSource('source-1').verificationState, 'verified');
   assert.equal(repository.getSource('source-1').freshnessState, 'current');
 
@@ -1203,6 +1238,7 @@ test('source integrity refresh marks changed content stale and revokes Evidence 
   assert.equal(source.verificationState, 'unverified');
   assert.equal(source.contentHash, 'a'.repeat(64));
   assert.equal(source.observedContentHash, 'b'.repeat(64));
+  assert.match(source.metadata.evidenceInvalidBefore, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(changed.project.stageGraph.currentStageKey, 'evidence');
 
   const refreshedAgain = repository.refreshSourceIntegrity({ id: 'source-1', contentHash: 'b'.repeat(64) });
@@ -1211,14 +1247,57 @@ test('source integrity refresh marks changed content stale and revokes Evidence 
   assert.equal(stillStale.verificationState, 'unverified');
   assert.equal(stillStale.contentHash, 'a'.repeat(64));
 
-  const accepted = repository.acceptSourceRevision({ id: 'source-1', contentHash: 'b'.repeat(64) });
+  const accepted = resolveSourceRevision(repository, 'source-1', 'b'.repeat(64));
   const acceptedSource = accepted.sources.find((item) => item.id === 'source-1');
   assert.equal(acceptedSource.freshnessState, 'current');
   assert.equal(acceptedSource.verificationState, 'unverified');
   assert.equal(acceptedSource.contentHash, 'a'.repeat(64));
   assert.equal(acceptedSource.observedContentHash, 'b'.repeat(64));
-  repository.setSourceVerification({ id: 'source-1', verificationState: 'verified' });
+  repository.setSourceVerification({ id: 'source-1', verificationState: 'verified', verification: sourceVerification('b'.repeat(64)) });
   assert.equal(repository.getSource('source-1').verificationState, 'verified');
+  assert.match(repository.getSource('source-1').metadata.evidenceInvalidBefore, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test('source verification requires locator, quote, claim, and current content hash', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  assert.throws(
+    () => repository.setSourceVerification({ id: 'source-1', verificationState: 'verified' }),
+    /定位|引文|主张|哈希/,
+  );
+  assert.throws(
+    () => repository.setSourceVerification({
+      id: 'source-1',
+      verificationState: 'verified',
+      verification: {
+        locator: 'line:3',
+        quote: 'Supported result.',
+        claim: 'The result is supported.',
+        contentHash: 'b'.repeat(64),
+      },
+    }),
+    /内容哈希/,
+  );
+
+  const state = repository.setSourceVerification({
+    id: 'source-1',
+    verificationState: 'verified',
+    verification: {
+      locator: 'line:3',
+      quote: 'Supported result.',
+      claim: 'The result is supported.',
+      contentHash: sourceRecord().contentHash,
+    },
+  });
+  const verified = state.sources.find((source) => source.id === 'source-1');
+  assert.equal(verified.verificationState, 'verified');
+  assert.equal(verified.metadata.verification.contentHash, sourceRecord().contentHash);
 });
 
 test('checkpoints can persist a pending decision before the dialog resolves', (t) => {
@@ -1245,4 +1324,88 @@ test('checkpoints can persist a pending decision before the dialog resolves', (t
   });
   assert.equal(resolved.decision, 'cancelled');
   assert.deepEqual(resolved.metadata, { sourceId: 'source-1' });
+});
+
+test('pending source revision checkpoints survive restart and resolve atomically', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  let repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  repository.refreshSourceIntegrity({ id: 'source-1', contentHash: 'b'.repeat(64) });
+  const pending = repository.beginCheckpoint({
+    type: 'source-revision-accepted',
+    rationale: 'Awaiting the user.',
+    metadata: { sourceId: 'source-1', observedContentHash: 'b'.repeat(64) },
+  });
+  repository.close();
+
+  repository = openTestRepository(databasePath);
+  assert.equal(repository.listPendingCheckpoints()[0].id, pending.id);
+  const state = repository.resolveSourceCheckpoint({
+    id: pending.id,
+    decision: 'approved',
+    rationale: 'User accepted the revision.',
+  });
+  assert.equal(state.sources.find((source) => source.id === 'source-1').freshnessState, 'current');
+  assert.equal(repository.listPendingCheckpoints().length, 0);
+  assert.equal(repository.listCheckpoints().find((checkpoint) => checkpoint.id === pending.id).decision, 'approved');
+});
+
+test('failed source checkpoint mutation rolls back the checkpoint decision', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  repository.refreshSourceIntegrity({ id: 'source-1', contentHash: 'b'.repeat(64) });
+  const pending = repository.beginCheckpoint({
+    type: 'source-revision-accepted',
+    rationale: 'Awaiting the user.',
+    metadata: { sourceId: 'source-1', observedContentHash: 'c'.repeat(64) },
+  });
+  assert.throws(
+    () => repository.resolveSourceCheckpoint({
+      id: pending.id,
+      decision: 'approved',
+      rationale: 'User accepted the revision.',
+    }),
+    /内容已再次变化/,
+  );
+  assert.equal(repository.listPendingCheckpoints()[0].id, pending.id);
+  assert.equal(repository.getSource('source-1').freshnessState, 'stale');
+});
+
+test('refreshing one record in a shared bibliography marks every dependent record stale', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({
+    sources: [
+      sourceRecord({ id: 'source-1', title: 'First Record', localLocator: '.science/sources/library.bib#entry-1' }),
+      sourceRecord({
+        id: 'source-2',
+        title: 'Second Record',
+        doi: '10.1000/second',
+        stableIdentifier: 'doi:10.1000/second',
+        localLocator: '.science/sources/library.bib#entry-2',
+      }),
+    ],
+  });
+  const state = repository.refreshSourceIntegrity({ id: 'source-1', contentHash: 'b'.repeat(64) });
+  for (const source of state.sources) {
+    assert.equal(source.freshnessState, 'stale');
+    assert.equal(source.observedContentHash, 'b'.repeat(64));
+    assert.equal(source.verificationState, 'unverified');
+  }
 });

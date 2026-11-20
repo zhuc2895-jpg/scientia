@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('scienceAgent', {
   sourceImportFiles: () => ipcRenderer.invoke('sources:pick-import'),
   sourceImportReference: (payload) => ipcRenderer.invoke('sources:import-reference', payload),
   sourceSetActive: (payload) => ipcRenderer.invoke('sources:set-active', payload),
+  sourcePendingCheckpoints: () => ipcRenderer.invoke('sources:pending-checkpoints'),
+  sourceResolveCheckpoint: (payload) => ipcRenderer.invoke('sources:resolve-checkpoint', payload),
   sourceRemove: (id) => ipcRenderer.invoke('sources:remove', id),
   sourceRefreshIntegrity: (id) => ipcRenderer.invoke('sources:refresh-integrity', id),
   sourceAcceptRevision: (id) => ipcRenderer.invoke('sources:accept-revision', id),

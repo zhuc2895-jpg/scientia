@@ -391,10 +391,10 @@ export function openProductRepository({ databasePath }) {
   const selectSourceById = database.prepare('SELECT id, project_id FROM sources WHERE id = ?');
   const deleteSource = database.prepare('DELETE FROM sources WHERE id = ? AND project_id = ?');
   const updateSourceVerification = database.prepare(
-    'UPDATE sources SET verification_state = ? WHERE id = ? AND project_id = ?',
+    'UPDATE sources SET verification_state = ?, metadata_json = ? WHERE id = ? AND project_id = ?',
   );
   const updateSourceIntegrity = database.prepare(
-    'UPDATE sources SET observed_content_hash = ?, freshness_state = ?, verification_state = ? WHERE id = ? AND project_id = ?',
+    'UPDATE sources SET observed_content_hash = ?, freshness_state = ?, verification_state = ?, metadata_json = ? WHERE id = ? AND project_id = ?',
   );
   const acceptSourceRevisionStatement = database.prepare(
     'UPDATE sources SET observed_content_hash = ?, freshness_state = \'current\', verification_state = \'unverified\' WHERE id = ? AND project_id = ?',
@@ -870,6 +870,48 @@ export function openProductRepository({ databasePath }) {
     return selectCheckpoints.all(project.id).map(serializeCheckpoint);
   }
 
+  function listPendingCheckpointRecords() {
+    return listCheckpointRecords().filter((checkpoint) => checkpoint.decision === 'pending');
+  }
+
+  function resolveSourceCheckpointRecord({ id, decision, rationale } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    const existing = selectCheckpointById.get(id, project.id);
+    if (!existing) throw new Error('无法处理不存在的 Checkpoint。');
+    if (existing.decision !== 'pending') throw new Error('Checkpoint 已经处理。');
+    const type = existing.type;
+    if (!['source-revision-accepted', 'source-removal'].includes(type)) {
+      throw new Error('该 Checkpoint 不是 Source 变更决策。');
+    }
+    const normalizedDecision = typeof decision === 'string' ? decision.trim() : '';
+    const normalizedRationale = typeof rationale === 'string' ? rationale.trim() : '';
+    if (!normalizedDecision || !normalizedRationale) throw new Error('Checkpoint 决定和理由不能为空。');
+    const normalizedMetadata = parseJsonObject(existing.metadata_json);
+    const sourceId = String(normalizedMetadata.sourceId || '').trim();
+    const timestamp = new Date().toISOString();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      updateCheckpoint.run(normalizedDecision, normalizedRationale, JSON.stringify(normalizedMetadata), id, project.id);
+      if (normalizedDecision === 'approved') {
+        if (type === 'source-revision-accepted') {
+          applySourceRevisionMutation({
+            id: sourceId,
+            projectId: project.id,
+            contentHash: normalizedMetadata.observedContentHash,
+          });
+        } else {
+          applySourceRemovalMutation(project, sourceId, timestamp);
+        }
+      }
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
+    }
+    return loadState();
+  }
+
   function getConversationProjectId(id) {
     assertOpen();
     if (typeof id !== 'string' || !id) return null;
@@ -1088,66 +1130,44 @@ export function openProductRepository({ databasePath }) {
     return { inserted, duplicates };
   }
 
-  function acceptSourceRevision({ id, contentHash } = {}) {
-    assertOpen();
-    const project = assertActiveProject();
-    const current = selectSourceForProject.get(id, project.id);
+  function applySourceRevisionMutation({ id, projectId, contentHash } = {}) {
+    const current = selectSourceForProject.get(id, projectId);
     if (!current) throw new Error('Source Record 不存在或不属于当前 Research Project。');
     if (current.freshness_state !== 'stale') throw new Error('只有 stale Source 才能接受新内容版本。');
     const normalizedHash = typeof contentHash === 'string' ? contentHash.trim().toLowerCase() : '';
     if (!/^[a-f0-9]{64}$/.test(normalizedHash)) throw new Error('Source content hash 无效。');
     if (normalizedHash !== current.observed_content_hash) throw new Error('Source 内容已再次变化，请先刷新。');
-    const timestamp = new Date().toISOString();
-    database.exec('BEGIN IMMEDIATE');
-    try {
-      acceptSourceRevisionStatement.run(normalizedHash, id, project.id);
-      database.exec('COMMIT');
-    } catch (error) {
-      database.exec('ROLLBACK');
-      throw error;
-    }
-    return loadState();
+    acceptSourceRevisionStatement.run(normalizedHash, id, projectId);
   }
 
-  function removeSource(id) {
-    assertOpen();
-    const project = assertActiveProject();
+  function applySourceRemovalMutation(project, id, timestamp) {
     const source = selectSourceForProject.get(id, project.id);
     if (!source) {
       if (selectSourceById.get(id)) throw new Error('Source 不属于当前 Research Project。');
       throw new Error('Source Record 不存在。');
     }
-    const timestamp = new Date().toISOString();
-    database.exec('BEGIN IMMEDIATE');
-    try {
-      deleteSource.run(id, project.id);
-      for (const conversationRow of selectConversations.all(project.id)) {
-        const conversationState = deserializeConversation(conversationRow);
-        if (!Array.isArray(conversationState.activeSourceIds) || !conversationState.activeSourceIds.includes(id)) continue;
-        const updated = {
-          ...conversationState,
-          activeSourceIds: conversationState.activeSourceIds.filter((sourceId) => sourceId !== id),
-          updatedAt: timestamp,
-        };
-        updateConversation.run(
-          updated.title,
-          updated.createdAt,
-          updated.updatedAt,
-          JSON.stringify(updated),
-          updated.id,
-          project.id,
-        );
-      }
-      revokeEvidenceFreezeAfterSourceMutation(project, timestamp);
-      database.exec('COMMIT');
-    } catch (error) {
-      database.exec('ROLLBACK');
-      throw error;
+    deleteSource.run(id, project.id);
+    for (const conversationRow of selectConversations.all(project.id)) {
+      const conversationState = deserializeConversation(conversationRow);
+      if (!Array.isArray(conversationState.activeSourceIds) || !conversationState.activeSourceIds.includes(id)) continue;
+      const updated = {
+        ...conversationState,
+        activeSourceIds: conversationState.activeSourceIds.filter((sourceId) => sourceId !== id),
+        updatedAt: timestamp,
+      };
+      updateConversation.run(
+        updated.title,
+        updated.createdAt,
+        updated.updatedAt,
+        JSON.stringify(updated),
+        updated.id,
+        project.id,
+      );
     }
-    return loadState();
+    revokeEvidenceFreezeAfterSourceMutation(project, timestamp);
   }
 
-  function setSourceVerification({ id, verificationState } = {}) {
+  function setSourceVerification({ id, verificationState, verification } = {}) {
     assertOpen();
     const project = assertActiveProject();
     if (!VERIFICATION_STATES.has(verificationState)) throw new Error('Source Verification State 无效。');
@@ -1156,7 +1176,33 @@ export function openProductRepository({ databasePath }) {
     if (verificationState === 'verified' && current.freshness_state === 'stale') {
       throw new Error('过期 Source Record 必须先刷新内容，不能直接标记为 verified。');
     }
-    updateSourceVerification.run(verificationState, id, project.id);
+    let metadata = parseJsonObject(current.metadata_json);
+    if (verificationState === 'verified') {
+      if (!verification || typeof verification !== 'object' || Array.isArray(verification)) {
+        throw new Error('Source 验证必须提供定位、短引文、支持主张与内容哈希。');
+      }
+      const locator = String(verification.locator || '').trim();
+      const quote = String(verification.quote || '').replace(/\s+/g, ' ').trim();
+      const claim = String(verification.claim || '').replace(/\s+/g, ' ').trim();
+      const contentHash = String(verification.contentHash || '').trim().toLowerCase();
+      if (!locator || !quote || !claim) throw new Error('Source 验证必须提供定位、短引文与支持主张。');
+      if (!/^[a-f0-9]{64}$/.test(contentHash)) throw new Error('Source 验证内容哈希无效。');
+      const currentHash = current.observed_content_hash || current.content_hash;
+      if (contentHash !== currentHash) throw new Error('Source 内容哈希已变化，必须重新核验。');
+      metadata = {
+        ...metadata,
+        verification: {
+          locator,
+          quote,
+          claim,
+          contentHash,
+          verifiedAt: typeof verification.verifiedAt === 'string' && !Number.isNaN(Date.parse(verification.verifiedAt))
+            ? new Date(verification.verifiedAt).toISOString()
+            : new Date().toISOString(),
+        },
+      };
+    }
+    updateSourceVerification.run(verificationState, JSON.stringify(metadata), id, project.id);
     return loadState();
   }
 
@@ -1167,22 +1213,36 @@ export function openProductRepository({ databasePath }) {
     if (!current) throw new Error('Source Record 不存在或不属于当前 Research Project。');
     const normalizedHash = typeof contentHash === 'string' ? contentHash.trim().toLowerCase() : '';
     if (!/^[a-f0-9]{64}$/.test(normalizedHash)) throw new Error('Source content hash 无效。');
-    const baselineHash = current.freshness_state === 'current'
-      ? (current.observed_content_hash || current.content_hash)
-      : current.content_hash;
-    const changed = normalizedHash !== baselineHash;
-    const verificationState = changed ? 'unverified' : (VERIFICATION_STATES.has(current.verification_state) ? current.verification_state : 'unverified');
+    const baseLocator = current.local_locator.split('#')[0];
+    const dependentSources = selectSources.all(project.id).filter(
+      (source) => source.local_locator.split('#')[0] === baseLocator,
+    );
     const timestamp = new Date().toISOString();
+    let changedAny = false;
     database.exec('BEGIN IMMEDIATE');
     try {
-      updateSourceIntegrity.run(
-        normalizedHash,
-        changed ? 'stale' : 'current',
-        verificationState,
-        id,
-        project.id,
-      );
-      if (changed) revokeEvidenceFreezeAfterSourceMutation(project, timestamp);
+      for (const source of dependentSources) {
+        const baselineHash = source.freshness_state === 'current'
+          ? (source.observed_content_hash || source.content_hash)
+          : source.content_hash;
+        const changed = normalizedHash !== baselineHash;
+        changedAny ||= changed;
+        const verificationState = changed
+          ? 'unverified'
+          : (VERIFICATION_STATES.has(source.verification_state) ? source.verification_state : 'unverified');
+        const metadata = parseJsonObject(source.metadata_json);
+        const observedChanged = normalizedHash !== (source.observed_content_hash || source.content_hash);
+        if (changed && observedChanged) metadata.evidenceInvalidBefore = timestamp;
+        updateSourceIntegrity.run(
+          normalizedHash,
+          changed ? 'stale' : 'current',
+          verificationState,
+          JSON.stringify(metadata),
+          source.id,
+          project.id,
+        );
+      }
+      if (changedAny) revokeEvidenceFreezeAfterSourceMutation(project, timestamp);
       database.exec('COMMIT');
     } catch (error) {
       database.exec('ROLLBACK');
@@ -1257,13 +1317,13 @@ export function openProductRepository({ databasePath }) {
     recordCheckpoint: recordCheckpointRecord,
     beginCheckpoint: beginCheckpointRecord,
     resolveCheckpoint: resolveCheckpointRecord,
+    resolveSourceCheckpoint: resolveSourceCheckpointRecord,
     listCheckpoints: listCheckpointRecords,
+    listPendingCheckpoints: listPendingCheckpointRecords,
     registerSources,
     getSource,
     setSourceVerification,
     refreshSourceIntegrity,
-    acceptSourceRevision,
-    removeSource,
     getConversationActiveSourceIds,
     getConversationActiveSources,
     setActiveSources,

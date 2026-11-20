@@ -153,12 +153,12 @@ export function buildBibTeXKey(source = {}) {
   const authors = (Array.isArray(source.authors) ? source.authors : []).map((author) => String(author || '').trim()).filter(Boolean);
   const firstFamily = (authors[0] || 'source').split(/\s+/).pop().replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'source';
   const titleWord = title.split(/\s+/).find((word) => word.length > 3)?.replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'record';
-  let hash = 2166136261;
+  let hash = 0xcbf29ce484222325n;
   for (const char of `${firstFamily}|${year || 'nd'}|${title.toLowerCase()}`) {
-    hash ^= char.codePointAt(0);
-    hash = Math.imul(hash, 16777619);
+    hash ^= BigInt(char.codePointAt(0));
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
-  return `${firstFamily}${year || 'nd'}${titleWord}${(hash >>> 0).toString(36).slice(0, 6)}`;
+  return `${firstFamily}${year || 'nd'}${titleWord}${hash.toString(36)}`;
 }
 
 export function buildBibTeX(source = {}) {

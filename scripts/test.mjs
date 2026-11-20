@@ -16,7 +16,7 @@ function run(label, command, args) {
   console.log(`OK   ${label}`);
 }
 
-for (const file of ['app/app.js', 'app/conversation-state.js', 'app/research-charter.js', 'app/research-run-policy.js', 'app/research-stages.js', 'app/source-library.js', 'electron/app-lifecycle.js', 'electron/config-store.js', 'electron/import-authorizer.js', 'electron/main.js', 'electron/native-secret-input.js', 'electron/path-boundary.js', 'electron/product-repository.js', 'electron/research-project-lifecycle.js', 'electron/project-workspace.js', 'electron/source-ingestion.js', 'electron/run-recovery.js', 'electron/runtime.js', 'electron/workspace-paths.js', 'electron/preload.cjs']) {
+for (const file of ['app/app.js', 'app/conversation-state.js', 'app/research-charter.js', 'app/research-run-policy.js', 'app/research-stages.js', 'app/source-library.js', 'electron/app-lifecycle.js', 'electron/config-store.js', 'electron/import-authorizer.js', 'electron/main.js', 'electron/native-secret-input.js', 'electron/path-boundary.js', 'electron/product-repository.js', 'electron/research-project-lifecycle.js', 'electron/project-workspace.js', 'electron/source-ingestion.js', 'electron/source-verification.js', 'electron/run-recovery.js', 'electron/runtime.js', 'electron/workspace-paths.js', 'electron/preload.cjs']) {
   run(`syntax ${file}`, process.execPath, ['--check', file]);
 }
 run('Application state tests', process.execPath, [
@@ -33,10 +33,11 @@ run('Application state tests', process.execPath, [
   'electron/tests/research-stages.test.mjs',
   'electron/tests/source-ingestion.test.mjs',
   'electron/tests/source-library.test.mjs',
+  'electron/tests/source-verification.test.mjs',
   'electron/tests/project-workspace.test.mjs',
   'electron/tests/run-recovery.test.mjs',
   'electron/tests/workspace-paths.test.mjs',
 ]);
-run('Python compile', python, ['-m', 'py_compile', 'science_agent/bridge.py', 'science_agent/daemon.py', 'science_agent/research_runtime.py']);
+run('Python compile', python, ['-m', 'py_compile', 'science_agent/bridge.py', 'science_agent/daemon.py', 'science_agent/research_runtime.py', 'science_agent/citation_audit.py']);
 run('Python unit tests', python, ['-m', 'unittest', 'discover', '-s', 'science_agent/tests', '-v']);
 run('Harness research profile', python, ['scripts/profile_check.py']);
