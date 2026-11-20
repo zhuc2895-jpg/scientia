@@ -323,6 +323,43 @@ class ResearchRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(duplicate_evidence_number["blocking"])
 
+        bibliography_source = [{
+            "localLocator": ".science/sources/paper.md",
+            "title": "A Reproducible Trial",
+            "freshnessState": "current",
+        }]
+        bibliography_fail = assess_result(
+            "Claim [1]. Limitation: x.\nReferences\n[1] Unregistered Paper. 2025.",
+            "Cite.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md", "citationNumber": 1}],
+            registered_sources=bibliography_source,
+            active_sources=bibliography_source,
+        )
+        self.assertTrue(bibliography_fail["blocking"])
+        bibliography_pass = assess_result(
+            "Claim [1]. Limitation: x.\nReferences\n[1] A Reproducible Trial. 2023.",
+            "Cite.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md", "citationNumber": 1}],
+            registered_sources=bibliography_source,
+            active_sources=bibliography_source,
+        )
+        self.assertFalse(bibliography_pass["blocking"])
+        compact_numbers = assess_result(
+            "Claim [1, 2]. Limitation: x.",
+            "Cite.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md", "citationNumber": 1}],
+            registered_sources=bibliography_source,
+            active_sources=bibliography_source,
+        )
+        self.assertTrue(compact_numbers["blocking"])
+        self.assertEqual(compact_numbers["outOfBoundaryCitations"], ["[1, 2]"])
+
         latex_source = [{
             "localLocator": ".science/sources/paper.md",
             "citekey": "smith2024",
@@ -348,6 +385,16 @@ class ResearchRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(latex_fail["blocking"])
         self.assertEqual(latex_fail["outOfBoundaryCitations"], ["\\cite{unregistered}"])
+        latex_spaced_fail = assess_result(
+            "Prior work \\cite {unregistered}. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=latex_source,
+            active_sources=latex_source,
+        )
+        self.assertTrue(latex_spaced_fail["blocking"])
 
         url_source = [{"localLocator": ".science/sources/paper.md", "url": "https://example.com/paper"}]
         url_fragment = assess_result(
@@ -394,6 +441,18 @@ class ResearchRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(stale_source["blocking"])
         self.assertEqual(stale_source["outOfBoundaryEvidenceSources"], ["paper.md"])
+
+        unverified_source = assess_result(
+            "Observed in [1]. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md", "citationNumber": 1}],
+            registered_sources=[{"localLocator": ".science/sources/paper.md", "verificationState": "unverified"}],
+            active_sources=[{"localLocator": ".science/sources/paper.md", "verificationState": "unverified"}],
+        )
+        self.assertTrue(unverified_source["blocking"])
+        self.assertEqual(unverified_source["outOfBoundaryEvidenceSources"], ["paper.md"])
 
     def test_prepare_and_terminal_manifests_record_source_scope(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -145,12 +145,20 @@ export function buildSourceRevisionCheckpointMetadata(source = {}) {
 }
 
 export function buildBibTeXKey(source = {}) {
+  if (typeof source.citekey === 'string' && source.citekey.trim()) {
+    return source.citekey.trim().replace(/[^A-Za-z0-9:_-]/g, '');
+  }
   const title = String(source.title || '').trim();
   const year = normalizeSourceYear(source.year);
   const authors = (Array.isArray(source.authors) ? source.authors : []).map((author) => String(author || '').trim()).filter(Boolean);
   const firstFamily = (authors[0] || 'source').split(/\s+/).pop().replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'source';
   const titleWord = title.split(/\s+/).find((word) => word.length > 3)?.replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'record';
-  return String(source.citekey || `${firstFamily}${year || 'nd'}${titleWord}`).replace(/[^A-Za-z0-9:_-]/g, '');
+  let hash = 2166136261;
+  for (const char of `${firstFamily}|${year || 'nd'}|${title.toLowerCase()}`) {
+    hash ^= char.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${firstFamily}${year || 'nd'}${titleWord}${(hash >>> 0).toString(36).slice(0, 6)}`;
 }
 
 export function buildBibTeX(source = {}) {

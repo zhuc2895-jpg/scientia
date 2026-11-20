@@ -2129,13 +2129,21 @@ function bindEvents() {
   els.sourceList.addEventListener('click', async (event) => {
     const verifyButton = event.target.closest('[data-verify-source]');
     if (verifyButton) {
+      const locator = window.prompt('输入可定位的页码、章节或行号：');
+      if (!locator) return;
+      const quote = window.prompt('输入支持主张的短引文：');
+      if (!quote) return;
+      const claim = window.prompt('输入该来源支持的有限主张：');
+      if (!claim) return;
       try {
-        applyProductState(await bridge.sourceSetVerification({
+        applyProductState(await bridge.sourceVerify({
           id: verifyButton.dataset.verifySource,
-          verificationState: 'verified',
+          locator,
+          quote,
+          claim,
         }));
         renderAll();
-        showToast('Source Record 已标记为已验证。');
+        showToast('Source Record 已完成验证并记录审计。');
       } catch (error) {
         showToast(error.message || '无法验证 Source Record。', 5000);
       }
@@ -2656,9 +2664,9 @@ function createPreviewBridge() {
       if (source) { source.freshnessState = 'current'; source.verificationState = 'unverified'; }
       return previewProductState();
     },
-    async sourceSetVerification({ id, verificationState }) {
+    async sourceVerify({ id }) {
       const source = previewSources.find((item) => item.id === id);
-      if (source) source.verificationState = verificationState;
+      if (source) source.verificationState = 'verified';
       return previewProductState();
     },
     async sourceRemove(id) {

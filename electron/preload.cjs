@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld('scienceAgent', {
   sourceRemove: (id) => ipcRenderer.invoke('sources:remove', id),
   sourceRefreshIntegrity: (id) => ipcRenderer.invoke('sources:refresh-integrity', id),
   sourceAcceptRevision: (id) => ipcRenderer.invoke('sources:accept-revision', id),
-  sourceSetVerification: (payload) => ipcRenderer.invoke('sources:set-verification', payload),
+  sourceVerify: (payload) => ipcRenderer.invoke('sources:verify', payload),
   runAgent: (payload) => ipcRenderer.invoke('agent:run', payload),
   cancelAgent: (runId) => ipcRenderer.invoke('agent:cancel', runId),
   recoverRun: (payload) => ipcRenderer.invoke('research:recover-run', payload),

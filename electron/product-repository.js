@@ -361,6 +361,14 @@ export function openProductRepository({ databasePath }) {
     SELECT id, project_id, type, decision, rationale, metadata_json, created_at
     FROM checkpoints WHERE project_id = ? ORDER BY created_at DESC, id DESC
   `);
+  const selectCheckpointById = database.prepare(`
+    SELECT id, project_id, type, decision, rationale, metadata_json, created_at
+    FROM checkpoints WHERE id = ? AND project_id = ?
+  `);
+  const updateCheckpoint = database.prepare(`
+    UPDATE checkpoints SET decision = ?, rationale = ?, metadata_json = ?
+    WHERE id = ? AND project_id = ?
+  `);
   const insertSource = database.prepare(`
     INSERT INTO sources (
       id, project_id, kind, title, normalized_title, authors_json, year, doi, url, venue,
@@ -830,6 +838,32 @@ export function openProductRepository({ databasePath }) {
     };
   }
 
+  function beginCheckpointRecord({ type, rationale, metadata = {} } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    const normalizedType = typeof type === 'string' ? type.trim() : '';
+    const normalizedRationale = typeof rationale === 'string' ? rationale.trim() : '';
+    if (!normalizedType || !normalizedRationale) throw new Error('Checkpoint 类型和理由不能为空。');
+    const normalizedMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    insertCheckpoint.run(id, project.id, normalizedType, 'pending', normalizedRationale, JSON.stringify(normalizedMetadata), createdAt);
+    return serializeCheckpoint(selectCheckpointById.get(id, project.id));
+  }
+
+  function resolveCheckpointRecord({ id, decision, rationale, metadata = {} } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    const normalizedDecision = typeof decision === 'string' ? decision.trim() : '';
+    const normalizedRationale = typeof rationale === 'string' ? rationale.trim() : '';
+    if (!normalizedDecision || !normalizedRationale) throw new Error('Checkpoint 决定和理由不能为空。');
+    const normalizedMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
+    const existing = selectCheckpointById.get(id, project.id);
+    if (!existing) throw new Error('无法处理不存在的 Checkpoint。');
+    updateCheckpoint.run(normalizedDecision, normalizedRationale, JSON.stringify(normalizedMetadata), id, project.id);
+    return serializeCheckpoint(selectCheckpointById.get(id, project.id));
+  }
+
   function listCheckpointRecords() {
     assertOpen();
     const project = assertActiveProject();
@@ -1221,6 +1255,8 @@ export function openProductRepository({ databasePath }) {
     getActiveResearchWorkspacePath,
     getBoundResearchWorkspacePaths,
     recordCheckpoint: recordCheckpointRecord,
+    beginCheckpoint: beginCheckpointRecord,
+    resolveCheckpoint: resolveCheckpointRecord,
     listCheckpoints: listCheckpointRecords,
     registerSources,
     getSource,

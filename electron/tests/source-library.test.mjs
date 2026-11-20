@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   buildSourceRemovalCheckpointMetadata,
+  buildBibTeXKey,
   buildSourceRevisionCheckpointMetadata,
   classifyReferenceInput,
   findDuplicateSource,
@@ -195,4 +196,11 @@ test('source revision checkpoint carries the complete decision contract', () => 
   assert.ok(metadata.options.length >= 2);
   assert.match(metadata.recommendation, /verify|核验/i);
   assert.match(metadata.estimatedTimeCost, /local|本地/i);
+});
+
+test('generated BibTeX keys distinguish titles sharing author and year', () => {
+  const base = { authors: ['Jane Source'], year: 2024 };
+  const first = buildBibTeXKey({ ...base, title: 'Alpha methods' });
+  const second = buildBibTeXKey({ ...base, title: 'Alpha results' });
+  assert.notEqual(first, second);
 });

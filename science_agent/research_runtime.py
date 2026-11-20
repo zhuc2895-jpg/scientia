@@ -503,7 +503,7 @@ def _author_year_components(value: str) -> tuple[int | None, set[str]]:
 
 
 def _reference_matches_source(reference: str, source: dict[str, Any]) -> bool:
-    if source.get("freshnessState") == "stale":
+    if source.get("freshnessState") == "stale" or source.get("verificationState") == "unverified":
         return False
     value = reference.strip().strip("'\"`").replace("\\", "/")
     lowered = value.lower()
@@ -587,6 +587,39 @@ def _latex_citation_keys(value: str) -> list[str]:
     return [key.strip() for key in match.group(1).split(",") if key.strip()]
 
 
+def _numeric_bibliography_entries(value: str) -> dict[int, str]:
+    entries: dict[int, str] = {}
+    for line in value.splitlines():
+        match = re.match(r"\s*\[(\d+)\]\s+(.+)", line)
+        if match:
+            entries[int(match.group(1))] = match.group(2).strip()
+    return entries
+
+
+def _bibliography_entry_authorized(
+    entry: str,
+    active_sources: list[dict[str, Any]],
+    registered_sources: list[dict[str, Any]],
+) -> bool:
+    lowered = entry.lower()
+    def matches(sources: list[dict[str, Any]]) -> bool:
+        return any(
+            any(
+                token and token.lower() in lowered
+                for token in (
+                    source.get("title"),
+                    source.get("doi"),
+                    source.get("url"),
+                    source.get("citekey"),
+                    source.get("stableIdentifier"),
+                )
+            )
+            for source in sources
+            if isinstance(source, dict) and source.get("freshnessState") != "stale" and source.get("verificationState") != "unverified"
+        )
+    return matches(active_sources) and matches(registered_sources)
+
+
 def _out_of_boundary_citations(
     result_text: str,
     active_sources: list[dict[str, Any]],
@@ -595,21 +628,29 @@ def _out_of_boundary_citations(
     authorized_citation_numbers: set[int] | None = None,
 ) -> list[str]:
     citations = re.findall(
-        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|\b10\.\d{4,9}/[^\s<>()]+|\[[0-9]+(?:[,–-][0-9]+)*\]|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)|[A-Z][A-Za-z'’-]+(?:\s+et al\.)?\s+\((?:19|20)\d{2}[a-z]?\)|\\(?:cite|citep|citet|parencite|textcite)\*?(?:\[[^\]]*\])*\{[^}]+\}|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
+        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|\b10\.\d{4,9}/[^\s<>()]+|\[[0-9]+(?:\s*[,–-]\s*[0-9]+)*\]|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)|[A-Z][A-Za-z'’-]+(?:\s+et al\.)?\s+\((?:19|20)\d{2}[a-z]?\)|\\(?:cite|citep|citet|parencite|textcite)\*?\s*(?:\[[^\]]*\]\s*)*\{[^}]+\}|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
         result_text,
         flags=re.IGNORECASE,
     )
     unresolved: list[str] = []
+    bibliography_entries = _numeric_bibliography_entries(result_text)
     for citation in citations:
         cleaned = citation.rstrip(".,;")
         if cleaned.lower().startswith(("http://", "https://")):
             while cleaned.endswith(")") and cleaned.count(")") > cleaned.count("("):
                 cleaned = cleaned[:-1]
-        if re.fullmatch(r"\[[0-9]+(?:[,–-][0-9]+)*\]", cleaned):
+        if re.fullmatch(r"\[[0-9]+(?:\s*[,–-]\s*[0-9]+)*\]", cleaned):
             numbers = [int(value) for value in re.findall(r"\d+", cleaned)]
             allowed_numbers = authorized_citation_numbers or set()
-            if not numbers or any(number not in allowed_numbers for number in numbers):
-                unresolved.append(cleaned)
+            for number in numbers:
+                bibliography_entry = bibliography_entries.get(number)
+                if bibliography_entry:
+                    if not _bibliography_entry_authorized(bibliography_entry, active_sources, registered_sources):
+                        unresolved.append(cleaned)
+                        break
+                elif number not in allowed_numbers:
+                    unresolved.append(cleaned)
+                    break
             continue
         latex_keys = _latex_citation_keys(cleaned)
         if latex_keys:
@@ -668,7 +709,7 @@ def assess_result(
 ) -> dict[str, Any]:
     text = result_text or ""
     citation_count = len(re.findall(
-        r"https?://|doi:\s*10\.\d{4,9}/\S+|\[[0-9]+(?:[,–-][0-9]+)*\]|`[^`]+\.(?:pdf|md|csv|py|ipynb)",
+        r"https?://|doi:\s*10\.\d{4,9}/\S+|\[[0-9]+(?:\s*[,–-]\s*[0-9]+)*\]|`[^`]+\.(?:pdf|md|csv|py|ipynb)",
         text,
         flags=re.IGNORECASE,
     ))

@@ -1220,3 +1220,29 @@ test('source integrity refresh marks changed content stale and revokes Evidence 
   repository.setSourceVerification({ id: 'source-1', verificationState: 'verified' });
   assert.equal(repository.getSource('source-1').verificationState, 'verified');
 });
+
+test('checkpoints can persist a pending decision before the dialog resolves', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const pending = repository.beginCheckpoint({
+    type: 'source-removal',
+    rationale: 'Awaiting user decision.',
+    metadata: { trigger: 'Remove source', risk: 'Evidence freeze' },
+  });
+  assert.equal(pending.decision, 'pending');
+  assert.equal(repository.listCheckpoints()[0].id, pending.id);
+
+  const resolved = repository.resolveCheckpoint({
+    id: pending.id,
+    decision: 'cancelled',
+    rationale: 'User cancelled removal.',
+    metadata: { sourceId: 'source-1' },
+  });
+  assert.equal(resolved.decision, 'cancelled');
+  assert.deepEqual(resolved.metadata, { sourceId: 'source-1' });
+});
