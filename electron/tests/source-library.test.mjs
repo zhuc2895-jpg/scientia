@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildSourceRemovalCheckpointMetadata,
   classifyReferenceInput,
   findDuplicateSource,
   normalizeDoi,
@@ -163,4 +164,19 @@ test('different stable identifiers are not collapsed by matching title and year'
     doi: '10.1000/beta',
     stableIdentifier: 'doi:10.1000/beta',
   }, existing), null);
+});
+
+test('source removal checkpoint carries the complete decision contract', () => {
+  const metadata = buildSourceRemovalCheckpointMetadata({
+    id: 'source-1',
+    title: 'A Reproducible Trial',
+    localLocator: '.science/sources/trial.md',
+  });
+
+  assert.equal(metadata.sourceId, 'source-1');
+  assert.match(metadata.trigger, /Source Library/);
+  assert.match(metadata.risk, /Active Source Set/);
+  assert.ok(metadata.options.length >= 2);
+  assert.match(metadata.recommendation, /preserve|保留/i);
+  assert.match(metadata.estimatedTimeCost, /local|本地/i);
 });

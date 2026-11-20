@@ -1067,6 +1067,7 @@ function renderSourceLibrary() {
           <span class="source-title">${escapeHTML(source.title)}</span>
           <span class="source-meta">${escapeHTML(sourceKindLabel(source.kind))}${escapeHTML(year)} · ${escapeHTML(authors)}${escapeHTML(sourceIdentifierLabel(source))}</span>
         </button>
+        <button type="button" class="source-refresh" data-refresh-source="${escapeHTML(source.id)}" title="刷新来源完整性" aria-label="刷新 ${escapeHTML(source.title)}">↻</button>
         <button type="button" class="source-remove" data-remove-source="${escapeHTML(source.id)}" title="从 Source Library 移除" aria-label="移除 ${escapeHTML(source.title)}">×</button>
       </div>
     `;
@@ -2121,6 +2122,17 @@ function bindEvents() {
     if (checkbox) void setConversationSourceActive(checkbox.dataset.sourceId, checkbox.checked);
   });
   els.sourceList.addEventListener('click', async (event) => {
+    const refreshButton = event.target.closest('[data-refresh-source]');
+    if (refreshButton) {
+      try {
+        applyProductState(await bridge.sourceRefreshIntegrity(refreshButton.dataset.refreshSource));
+        renderAll();
+        showToast('Source Record 完整性已刷新。');
+      } catch (error) {
+        showToast(error.message || '无法刷新 Source Record。', 5000);
+      }
+      return;
+    }
     const removeButton = event.target.closest('[data-remove-source]');
     if (removeButton) {
       try {
@@ -2602,6 +2614,11 @@ function createPreviewBridge() {
       const conversations = previewConversationsByProject.get(previewActiveProjectId) || [];
       const conversation = conversations.find((item) => item.id === conversationId);
       if (conversation) conversation.activeSourceIds = [...sourceIds];
+      return previewProductState();
+    },
+    async sourceRefreshIntegrity(id) {
+      const source = previewSources.find((item) => item.id === id);
+      if (source) source.freshnessState = 'current';
       return previewProductState();
     },
     async sourceRemove(id) {

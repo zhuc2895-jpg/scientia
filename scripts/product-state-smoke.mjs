@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,6 +20,8 @@ let port = 0;
 let child = null;
 let socket = null;
 let cdp = null;
+let sourceServer = null;
+let sourceContentUrl = '';
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -74,6 +77,15 @@ async function launchApp() {
 
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
+  sourceServer = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    response.end('<html><body>Smoke source content</body></html>');
+  });
+  await new Promise((resolve, reject) => {
+    sourceServer.once('error', reject);
+    sourceServer.listen(0, '127.0.0.1', resolve);
+  });
+  sourceContentUrl = `http://127.0.0.1:${sourceServer.address().port}/smoke-source`;
       const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
       const page = pages.find((target) => target.type === 'page' && target.url.includes('/app/index.html'));
       if (page) return page.webSocketDebuggerUrl;
@@ -384,24 +396,26 @@ try {
   console.log('OK   File imports require main-process authorization tokens');
 
   const sourceImport = await evaluate(cdp, `window.scienceAgent.sourceImportReference({
-    reference: 'https://doi.org/10.1000/SMOKE',
+    reference: ${JSON.stringify(sourceContentUrl)},
     title: 'Smoke source record',
     year: 2026,
   })`);
   assert.equal(sourceImport.imported.length, 1);
   assert.equal(sourceImport.duplicates.length, 0);
   const smokeSource = sourceImport.imported[0];
-  assert.equal(smokeSource.doi, '10.1000/smoke');
+  assert.equal(smokeSource.url, sourceContentUrl);
   assert.equal(smokeSource.cslJson.title, 'Smoke source record');
   assert.equal(smokeSource.localLocator.startsWith('.science/sources/'), true);
   assert.equal(await evaluate(cdp, 'typeof window.scienceAgent.sourceRemove'), 'function');
+  const refreshedSourceState = await evaluate(cdp, `window.scienceAgent.sourceRefreshIntegrity(${JSON.stringify(smokeSource.id)})`);
+  assert.equal(refreshedSourceState.sources.find((source) => source.id === smokeSource.id).freshnessState, 'current');
   assert.equal(existsSync(path.join(workspace, smokeSource.localLocator)), true);
   const activeSourceState = await evaluate(cdp, `window.scienceAgent.sourceSetActive({
     conversationId: ${JSON.stringify(expectedId)},
     sourceIds: [${JSON.stringify(smokeSource.id)}],
   })`);
   assert.deepEqual(activeSourceState.conversations.find((conversation) => conversation.id === expectedId).activeSourceIds, [smokeSource.id]);
-  console.log('OK   DOI registration creates a durable Project Source Record and Active Source Set');
+  console.log('OK   URL retrieval creates a durable Project Source Record and Active Source Set');
 
   const initialProjectId = created.activeProjectId;
   const existingProjectIds = created.projects.map((project) => project.id);
@@ -726,5 +740,10 @@ try {
   console.log('OK   Explicit save binds a pending Research Project and repairs derived config');
 } finally {
   await stopApp();
+  if (sourceServer) {
+    sourceServer.closeAllConnections?.();
+    sourceServer.close();
+  }
   rmSync(userData, { recursive: true, force: true });
 }
+process.exit(0);

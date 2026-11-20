@@ -54,6 +54,7 @@ function conversation(overrides = {}) {
     activities: [],
     evidenceMode: true,
     researchMode: 'literature',
+    activeSourceIds: [],
     ...overrides,
   };
 }
@@ -1124,7 +1125,7 @@ test('conversation updates cannot bypass Active Source Set ownership validation'
     ...secondConversation,
     activeSourceIds: ['source-1'],
   }), /不属于当前 Research Project/);
-  assert.equal(repository.loadState().conversations.find((item) => item.id === secondConversation.id).activeSourceIds, undefined);
+  assert.deepEqual(repository.loadState().conversations.find((item) => item.id === secondConversation.id).activeSourceIds, []);
 });
 test('conversation creation rejects Active Source IDs from another project', (t) => {
   const { directory, databasePath } = temporaryDatabase();
@@ -1175,4 +1176,30 @@ test('removing a source clears active sets and revokes Evidence Freeze', (t) => 
     [],
   );
   assert.equal(state.project.stageGraph.currentStageKey, 'evidence');
+});
+
+test('source integrity refresh marks changed content stale and revokes Evidence Freeze', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  repository.registerSources({ sources: [sourceRecord()] });
+  repository.setSourceVerification({ id: 'source-1', verificationState: 'verified' });
+  assert.equal(repository.getSource('source-1').verificationState, 'verified');
+  assert.equal(repository.getSource('source-1').freshnessState, 'current');
+
+  repository.refreshSourceIntegrity({ id: 'source-1', contentHash: 'a'.repeat(64) });
+  assert.equal(repository.getSource('source-1').verificationState, 'verified');
+  assert.equal(repository.getSource('source-1').freshnessState, 'current');
+
+  approveTestCharter(repository);
+  repository.completeResearchStage('evidence');
+  const changed = repository.refreshSourceIntegrity({ id: 'source-1', contentHash: 'b'.repeat(64) });
+  const source = changed.sources.find((item) => item.id === 'source-1');
+  assert.equal(source.freshnessState, 'stale');
+  assert.equal(source.verificationState, 'unverified');
+  assert.equal(changed.project.stageGraph.currentStageKey, 'evidence');
 });

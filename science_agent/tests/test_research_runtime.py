@@ -231,6 +231,129 @@ class ResearchRuntimeTests(unittest.TestCase):
             ["https://untrusted.example/paper.pdf"],
         )
 
+        numbered_citation = assess_result(
+            "Prior work [42] supports this. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            0,
+            registered_sources=[],
+            active_sources=[],
+        )
+        self.assertTrue(numbered_citation["blocking"])
+        self.assertEqual(numbered_citation["outOfBoundaryCitations"], ["[42]"])
+
+        author_year_source = [{
+            "localLocator": ".science/sources/paper.md",
+            "authors": ["Jane Smith"],
+            "year": 2023,
+        }]
+        author_year_pass = assess_result(
+            "Prior work (Smith, 2023) supports this. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=author_year_source,
+            active_sources=author_year_source,
+        )
+        self.assertFalse(author_year_pass["blocking"])
+        author_year_fail = assess_result(
+            "Prior work (Jones, 2023) supports this. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=author_year_source,
+            active_sources=author_year_source,
+        )
+        self.assertTrue(author_year_fail["blocking"])
+        self.assertEqual(author_year_fail["outOfBoundaryCitations"], ["(Jones, 2023)"])
+
+        path_collision = assess_result(
+            "Observed in [1]. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "other/paper.pdf"}],
+            registered_sources=[{"localLocator": ".science/sources/paper.pdf"}],
+            active_sources=[{"localLocator": ".science/sources/paper.pdf"}],
+        )
+        self.assertTrue(path_collision["blocking"])
+        self.assertEqual(path_collision["outOfBoundaryEvidenceSources"], ["other/paper.pdf"])
+
+        stale_source = assess_result(
+            "Observed in [1]. Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=[{"localLocator": ".science/sources/paper.md", "freshnessState": "stale"}],
+            active_sources=[{"localLocator": ".science/sources/paper.md", "freshnessState": "stale"}],
+        )
+        self.assertTrue(stale_source["blocking"])
+        self.assertEqual(stale_source["outOfBoundaryEvidenceSources"], ["paper.md"])
+
+    def test_prepare_and_terminal_manifests_record_source_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            registered = [{"id": "source-1", "title": "Paper", "localLocator": ".science/sources/paper.md", "contentHash": "a" * 64}]
+            active = [registered[0]]
+            context = prepare_research_run(
+                workspace,
+                conversation_id="conversation-source-scope",
+                run_id="run-source-scope",
+                prompt="Continue the review.",
+                model="deepseek-v4-flash",
+                registered_sources=registered,
+                active_sources=active,
+            )
+            manifest_path = workspace / ".science" / "runs" / context["sessionKey"] / context["runKey"] / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["sourceScope"]["registered"][0]["id"], "source-1")
+            self.assertEqual(manifest["sourceScope"]["active"][0]["id"], "source-1")
+
+            finalize_research_run(
+                workspace,
+                run_context=context,
+                result_text="",
+                prompt="Continue the review.",
+                status="cancelled",
+                error="cancelled by user",
+                registered_sources=registered,
+                active_sources=active,
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "cancelled")
+            self.assertEqual(manifest["sourceScope"]["registered"][0]["id"], "source-1")
+
+    def test_finalize_audits_generated_artifact_citations_against_active_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            context = prepare_research_run(
+                workspace,
+                conversation_id="conversation-artifact-gate",
+                run_id="run-artifact-gate",
+                prompt="Write a sourced report.",
+                model="deepseek-v4-flash",
+            )
+            report = workspace / context["outputDir"] / "report.md"
+            report.write_text("See https://unregistered.example/paper.\n", encoding="utf-8")
+
+            result = finalize_research_run(
+                workspace,
+                run_context=context,
+                result_text="Report written. Limitation: one source.",
+                prompt="Write a sourced report.",
+                status="completed",
+                registered_sources=[{"localLocator": ".science/sources/paper.md"}],
+                active_sources=[{"localLocator": ".science/sources/paper.md"}],
+            )
+            self.assertTrue(result["quality"]["blocking"])
+            self.assertEqual(
+                result["quality"]["outOfBoundaryCitations"],
+                ["https://unregistered.example/paper"],
+            )
+
     def test_finalize_records_registered_and_active_source_scope_in_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)

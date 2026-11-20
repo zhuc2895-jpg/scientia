@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -46,6 +46,10 @@ test('file ingestion creates durable source records for PDF, Markdown, TeX, BibT
   assert.deepEqual(records[3].cslJson.issued['date-parts'], [[2024]]);
   assert.equal(records[4].title, 'Trial Two');
   assert.equal(records[4].cslJson.title, 'Trial Two');
+  for (const record of records) {
+    assert.equal(typeof record.bibtex, 'string');
+    assert.match(record.bibtex, /^@/);
+  }
 
   for (const record of records) {
     assert.match(record.contentHash, /^[a-f0-9]{64}$/);
@@ -139,4 +143,18 @@ test('DOI and URL imports hash and preserve fetched source content', async (t) =
   assert.equal(record.metadata.contentHashBasis, 'retrieved-content');
   assert.ok(record.localLocator.endsWith('.html'));
   assert.deepEqual(readFileSync(path.join(workspace, record.localLocator)), fetchedBytes);
+});
+
+test('reference import does not register metadata when source content cannot be retrieved', async (t) => {
+  const workspace = temporaryWorkspace(t);
+  const fetchImpl = async () => new Response('missing', { status: 404 });
+
+  await assert.rejects(() => ingestReference({
+    workspacePath: workspace,
+    reference: 'https://example.com/missing',
+    fetchImpl,
+  }), /无法获取 DOI\/URL 内容/);
+
+  const sourceDirectory = path.join(workspace, '.science', 'sources');
+  assert.equal(existsSync(sourceDirectory), false);
 });

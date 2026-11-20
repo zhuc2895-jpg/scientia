@@ -374,6 +374,12 @@ export function openProductRepository({ databasePath }) {
   `);
   const selectSourceById = database.prepare('SELECT id, project_id FROM sources WHERE id = ?');
   const deleteSource = database.prepare('DELETE FROM sources WHERE id = ? AND project_id = ?');
+  const updateSourceVerification = database.prepare(
+    'UPDATE sources SET verification_state = ? WHERE id = ? AND project_id = ?',
+  );
+  const updateSourceIntegrity = database.prepare(
+    'UPDATE sources SET content_hash = ?, freshness_state = ?, verification_state = ? WHERE id = ? AND project_id = ?',
+  );
 
   let closed = false;
 
@@ -1074,6 +1080,47 @@ export function openProductRepository({ databasePath }) {
     return loadState();
   }
 
+  function setSourceVerification({ id, verificationState } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    if (!VERIFICATION_STATES.has(verificationState)) throw new Error('Source Verification State 无效。');
+    const current = selectSourceForProject.get(id, project.id);
+    if (!current) throw new Error('Source Record 不存在或不属于当前 Research Project。');
+    if (verificationState === 'verified' && current.freshness_state === 'stale') {
+      throw new Error('过期 Source Record 必须先刷新内容，不能直接标记为 verified。');
+    }
+    updateSourceVerification.run(verificationState, id, project.id);
+    return loadState();
+  }
+
+  function refreshSourceIntegrity({ id, contentHash } = {}) {
+    assertOpen();
+    const project = assertActiveProject();
+    const current = selectSourceForProject.get(id, project.id);
+    if (!current) throw new Error('Source Record 不存在或不属于当前 Research Project。');
+    const normalizedHash = typeof contentHash === 'string' ? contentHash.trim().toLowerCase() : '';
+    if (!/^[a-f0-9]{64}$/.test(normalizedHash)) throw new Error('Source content hash 无效。');
+    const changed = normalizedHash !== current.content_hash;
+    const verificationState = changed ? 'unverified' : (VERIFICATION_STATES.has(current.verification_state) ? current.verification_state : 'unverified');
+    const timestamp = new Date().toISOString();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      updateSourceIntegrity.run(
+        normalizedHash,
+        changed ? 'stale' : 'current',
+        verificationState,
+        id,
+        project.id,
+      );
+      if (changed) revokeEvidenceFreezeAfterSourceMutation(project, timestamp);
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
+    }
+    return loadState();
+  }
+
   function getSource(id) {
     assertOpen();
     const project = assertActiveProject();
@@ -1141,6 +1188,8 @@ export function openProductRepository({ databasePath }) {
     listCheckpoints: listCheckpointRecords,
     registerSources,
     getSource,
+    setSourceVerification,
+    refreshSourceIntegrity,
     removeSource,
     getConversationActiveSourceIds,
     getConversationActiveSources,

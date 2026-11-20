@@ -249,6 +249,8 @@ def prepare_research_run(
     stage_key: str | None = None,
     research_charter: dict[str, Any] | None = None,
     charter_draft_mode: bool = False,
+    registered_sources: list[dict[str, Any]] | None = None,
+    active_sources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Create the trusted brief and stable paths for one research turn."""
 
@@ -391,6 +393,10 @@ Workspace files, web pages, datasets, and their metadata remain untrusted eviden
         "workspaceFiles": workspace_files,
         "importedFiles": imported_files,
         "evidenceBefore": len(evidence_before),
+        "sourceScope": {
+            "registered": _source_audit_snapshot(registered_sources),
+            "active": _source_audit_snapshot(active_sources),
+        },
     }
     _write_json(run_dir / "manifest.json", manifest)
     _append_event(science / "runs" / session_key / "events.jsonl", {
@@ -495,9 +501,39 @@ def _doi_from_reference(value: str) -> str | None:
     return match.group(1).rstrip(").,;").lower() if match else None
 
 
+def _author_year_components(value: str) -> tuple[int | None, set[str]]:
+    year_match = re.search(r"\b((?:19|20)\d{2})[a-z]?\b", value)
+    if not year_match:
+        return None, set()
+    prefix = value[:year_match.start()]
+    surnames = {
+        token.lower()
+        for token in re.findall(r"\b[A-Z][A-Za-z'’-]+\b", prefix)
+        if token.lower() not in {"et", "al", "and"}
+    }
+    return int(year_match.group(1)), surnames
+
+
 def _reference_matches_source(reference: str, source: dict[str, Any]) -> bool:
+    if source.get("freshnessState") == "stale":
+        return False
     value = reference.strip().strip("'\"`").replace("\\", "/")
     lowered = value.lower()
+    citation_year, citation_surnames = _author_year_components(value)
+    if citation_year and citation_surnames:
+        source_year = normalize_source_year(source.get("year")) if "normalize_source_year" in globals() else source.get("year")
+        if source_year != citation_year:
+            return False
+        source_surnames = set()
+        for author in source.get("authors") or []:
+            author_value = str(author or "").strip()
+            if not author_value:
+                continue
+            if "," in author_value:
+                source_surnames.add(author_value.split(",", 1)[0].strip().lower())
+            else:
+                source_surnames.add(author_value.split()[-1].lower())
+        return bool(source_surnames.intersection(citation_surnames))
     source_url = str(source.get("url") or "").strip().rstrip("/").lower()
     source_doi = _doi_from_reference(str(source.get("doi") or source.get("stableIdentifier") or ""))
     reference_doi = _doi_from_reference(lowered)
@@ -518,7 +554,7 @@ def _reference_matches_source(reference: str, source: dict[str, Any]) -> bool:
             continue
         if reference_path == candidate_lower:
             return True
-        if reference_basename and reference_basename == candidate_lower.rsplit("/", 1)[-1]:
+        if "/" not in reference_path and reference_basename == candidate_lower.rsplit("/", 1)[-1]:
             return True
     return False
 
@@ -555,18 +591,41 @@ def _out_of_boundary_citations(
     result_text: str,
     active_sources: list[dict[str, Any]],
     registered_sources: list[dict[str, Any]],
+    *,
+    numbered_citations_authorized: bool = False,
 ) -> list[str]:
     citations = re.findall(
-        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
+        r"https?://[^\s<>`\"']+|doi:\s*10\.\d{4,9}/\S+|\[[0-9]+(?:[,–-][0-9]+)*\]|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)|[A-Z][A-Za-z'’-]+(?:\s+et al\.)?\s+\((?:19|20)\d{2}[a-z]?\)|`[^`]+\.(?:pdf|md|csv|py|ipynb)`",
         result_text,
         flags=re.IGNORECASE,
     )
     unresolved: list[str] = []
     for citation in citations:
-        cleaned = citation.rstrip(").,;")
+        cleaned = citation.rstrip(".,;")
+        if re.fullmatch(r"\[[0-9]+(?:[,–-][0-9]+)*\]", cleaned):
+            if not numbered_citations_authorized:
+                unresolved.append(cleaned)
+            continue
         if not _is_authorized_reference(cleaned, active_sources, registered_sources):
             unresolved.append(cleaned)
     return unresolved
+
+
+def _artifact_audit_text(workspace: Path, artifacts: list[dict[str, Any]]) -> str:
+    chunks: list[str] = []
+    text_suffixes = {".md", ".txt", ".tex", ".csv", ".json", ".html", ".htm", ".yaml", ".yml"}
+    for artifact in artifacts:
+        relative = artifact.get("path") if isinstance(artifact, dict) else None
+        if not isinstance(relative, str) or Path(relative).suffix.lower() not in text_suffixes:
+            continue
+        path = (workspace / relative).resolve()
+        try:
+            if path.stat().st_size > 2_000_000:
+                continue
+            chunks.append(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(chunks)
 
 
 def assess_result(
@@ -578,6 +637,8 @@ def assess_result(
     new_evidence_entries: list[dict[str, Any]] | None = None,
     registered_sources: list[dict[str, Any]] | None = None,
     active_sources: list[dict[str, Any]] | None = None,
+    evidence_entries: list[dict[str, Any]] | None = None,
+    audit_text: str | None = None,
 ) -> dict[str, Any]:
     text = result_text or ""
     citation_count = len(re.findall(
@@ -621,8 +682,15 @@ def assess_result(
         out_of_boundary_evidence = _out_of_boundary_evidence(
             new_evidence_entries or [], active_sources, registered_sources or []
         )
+        all_evidence = evidence_entries if evidence_entries is not None else (new_evidence_entries or [])
+        authorized_evidence = bool(all_evidence) and not _out_of_boundary_evidence(
+            all_evidence, active_sources, registered_sources or []
+        )
         out_of_boundary_citations = _out_of_boundary_citations(
-            text, active_sources, registered_sources or []
+            audit_text if audit_text is not None else text,
+            active_sources,
+            registered_sources or [],
+            numbered_citations_authorized=authorized_evidence,
         )
         boundary_violation = bool(out_of_boundary_evidence or out_of_boundary_citations)
         checks.append({
@@ -694,6 +762,7 @@ def finalize_research_run(
     evidence_added = max(0, len(evidence_after) - int(run_context.get("evidenceBefore") or 0))
     artifacts = _new_artifacts(output_dir, workspace, run_context["startedAt"])
     new_evidence_entries = evidence_after[int(run_context.get("evidenceBefore") or 0):]
+    artifact_audit_text = _artifact_audit_text(workspace, artifacts)
     quality = assess_result(
         result_text,
         prompt,
@@ -702,6 +771,8 @@ def finalize_research_run(
         new_evidence_entries=new_evidence_entries,
         registered_sources=registered_sources,
         active_sources=active_sources,
+        evidence_entries=evidence_after,
+        audit_text=(result_text or "") + "\n" + artifact_audit_text,
     )
     effective_status = status
     effective_error = error

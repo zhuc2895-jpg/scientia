@@ -15,6 +15,9 @@ export function normalizeConversation(value, { now = new Date().toISOString() } 
     activities: Array.isArray(value.activities) ? value.activities.map((activity) => ({ ...activity })) : [],
     evidenceMode: value.evidenceMode !== false,
     researchMode: typeof value.researchMode === 'string' ? value.researchMode : 'auto',
+    activeSourceIds: Array.isArray(value.activeSourceIds)
+      ? [...new Set(value.activeSourceIds.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))]
+      : [],
     ...(value.activeRun && typeof value.activeRun === 'object'
       ? { activeRun: { ...value.activeRun } }
       : {}),

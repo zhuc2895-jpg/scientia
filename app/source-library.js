@@ -118,6 +118,42 @@ export function buildCslJson(source = {}) {
   return csl;
 }
 
+export function buildSourceRemovalCheckpointMetadata(source = {}) {
+  return {
+    sourceId: String(source.id || ''),
+    title: String(source.title || ''),
+    localLocator: String(source.localLocator || ''),
+    trigger: 'User requested removal from the Project Source Library.',
+    risk: 'The Source Record disappears from the Project and every Active Source Set; Evidence Freeze will be revoked.',
+    options: ['Remove the Source Record', 'Cancel and keep the Source Record'],
+    recommendation: 'Preserve the Source Record unless it is wrong or no longer relevant; removal returns the Project to Evidence.',
+    estimatedTimeCost: 'Local metadata and managed-copy cleanup; seconds, no model cost.',
+  };
+}
+
+export function buildBibTeX(source = {}) {
+  const title = String(source.title || '').trim();
+  const year = normalizeSourceYear(source.year);
+  const authors = (Array.isArray(source.authors) ? source.authors : []).map((author) => String(author || '').trim()).filter(Boolean);
+  const firstFamily = (authors[0] || 'source').split(/\s+/).pop().replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'source';
+  const titleWord = title.split(/\s+/).find((word) => word.length > 3)?.replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'record';
+  const key = String(source.citekey || `${firstFamily}${year || 'nd'}${titleWord}`).replace(/[^A-Za-z0-9:_-]/g, '');
+  const entryType = source.kind === 'doi' || source.entryType === 'article' || source.entryType === 'JOUR'
+    ? 'article'
+    : source.entryType === 'book' || source.entryType === 'BOOK'
+      ? 'book'
+      : 'misc';
+  const fields = [
+    title ? `  title = {${title.replace(/[{}]/g, '')}}` : '',
+    authors.length ? `  author = {${authors.join(' and ')}}` : '',
+    year ? `  year = {${year}}` : '',
+    normalizeDoi(source.doi) ? `  doi = {${normalizeDoi(source.doi)}}` : '',
+    normalizeSourceUrl(source.url) ? `  url = {${normalizeSourceUrl(source.url)}}` : '',
+    source.venue ? `  journal = {${String(source.venue).replace(/[{}]/g, '')}}` : '',
+  ].filter(Boolean);
+  return `@${entryType}{${key},\n${fields.join(',\n')}${fields.length ? '\n' : ''}}`;
+}
+
 export function findDuplicateSource(candidate, existingSources = []) {
   const candidateStable = stableIdentifierForSource(candidate);
   const candidateDoi = normalizeDoi(candidate?.doi);

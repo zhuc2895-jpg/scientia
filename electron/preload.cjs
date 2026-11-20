@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('scienceAgent', {
   sourceImportReference: (payload) => ipcRenderer.invoke('sources:import-reference', payload),
   sourceSetActive: (payload) => ipcRenderer.invoke('sources:set-active', payload),
   sourceRemove: (id) => ipcRenderer.invoke('sources:remove', id),
+  sourceRefreshIntegrity: (id) => ipcRenderer.invoke('sources:refresh-integrity', id),
   runAgent: (payload) => ipcRenderer.invoke('agent:run', payload),
   cancelAgent: (runId) => ipcRenderer.invoke('agent:cancel', runId),
   recoverRun: (payload) => ipcRenderer.invoke('research:recover-run', payload),

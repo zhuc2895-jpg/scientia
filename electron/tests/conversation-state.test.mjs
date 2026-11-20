@@ -6,6 +6,7 @@ import {
   buildRunContinuationPrompt,
   canContinueRecoveredRun,
   conversationSnapshot,
+  normalizeConversation,
   reconcileRunManifest,
   prepareConversationForNextRun,
   recoverInterruptedRuns,
@@ -262,4 +263,15 @@ test('continuation requires a successfully loaded manifest', () => {
     ...base,
     activeRun: { ...base.activeRun, manifest: { status: 'running' } },
   }), true);
+});
+
+test('conversation normalization materializes an explicit active source set', () => {
+  const empty = normalizeConversation({ id: 'conversation-empty-sources' });
+  assert.deepEqual(empty.activeSourceIds, []);
+
+  const normalized = normalizeConversation({
+    id: 'conversation-sources',
+    activeSourceIds: ['source-a', 'source-a', '', null, 'source-b'],
+  });
+  assert.deepEqual(normalized.activeSourceIds, ['source-a', 'source-b']);
 });

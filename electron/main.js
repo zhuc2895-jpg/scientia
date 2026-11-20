@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, Tray } from 'electron';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -16,7 +16,7 @@ import { captureSecretFromUser } from './native-secret-input.js';
 import { createImportAuthorizer } from './import-authorizer.js';
 import { resolveWorkspaceEntry } from './workspace-paths.js';
 import { removeManagedProjectWorkspace } from './project-workspace.js';
-import { pathKey } from './path-boundary.js';
+import { isWithin, pathKey } from './path-boundary.js';
 import { createConfigStore } from './config-store.js';
 import { createResearchProjectLifecycle } from './research-project-lifecycle.js';
 import { researchCharterContentString, researchCharterFieldsEqual } from '../app/research-charter.js';
@@ -426,6 +426,18 @@ async function registerImportedSources(workspacePath, sources) {
   };
 }
 
+async function refreshProjectSource(id) {
+  const source = productRepository.getSource(id);
+  if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
+  const workspace = path.resolve(currentProjectWorkspace());
+  const localLocator = source.localLocator.split('#')[0];
+  const sourcePath = path.resolve(workspace, localLocator);
+  if (!isWithin(workspace, sourcePath)) throw new Error('Source local locator 不在当前 Research Workspace 中。');
+  const bytes = await fs.readFile(sourcePath);
+  const contentHash = createHash('sha256').update(bytes).digest('hex');
+  return productRepository.refreshSourceIntegrity({ id, contentHash });
+}
+
 async function removeProjectSource(id) {
   const source = productRepository.getSource(id);
   if (!source) throw new Error('Source Record 不存在或不属于当前 Research Project。');
@@ -446,7 +458,7 @@ async function removeProjectSource(id) {
     rationale: decision === 'approved'
       ? 'User approved removing a Source Record from the Project Source Library.'
       : 'User cancelled removing a Source Record from the Project Source Library.',
-    metadata: { sourceId: source.id, title: source.title, localLocator: source.localLocator },
+    metadata: buildSourceRemovalCheckpointMetadata(source),
   });
   if (decision !== 'approved') throw new Error('User cancelled Source Record removal.');
   const nextState = productRepository.removeSource(id);
@@ -849,6 +861,7 @@ function installIpc() {
   ipcMain.handle('sources:import-reference', async (_event, payload) => importSourceReference(payload));
   ipcMain.handle('sources:set-active', async (_event, payload) => productRepository.setActiveSources(payload));
   ipcMain.handle('sources:remove', async (_event, id) => removeProjectSource(id));
+  ipcMain.handle('sources:refresh-integrity', async (_event, id) => refreshProjectSource(id));
   ipcMain.handle('agent:run', async (event, payload) => runAgent(payload, event.sender));
   ipcMain.handle('agent:cancel', async (_event, runId) => cancelAgent(runId));
   ipcMain.handle('research:recover-run', async (_event, payload) => {
