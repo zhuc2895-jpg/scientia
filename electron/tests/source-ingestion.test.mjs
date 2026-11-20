@@ -49,6 +49,8 @@ test('file ingestion creates durable source records for PDF, Markdown, TeX, BibT
   for (const record of records) {
     assert.equal(typeof record.bibtex, 'string');
     assert.match(record.bibtex, /^@/);
+    assert.equal(typeof record.citekey, 'string');
+    assert.match(record.bibtex, new RegExp(`\{${record.citekey},`));
   }
 
   for (const record of records) {

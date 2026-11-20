@@ -1215,7 +1215,8 @@ test('source integrity refresh marks changed content stale and revokes Evidence 
   const acceptedSource = accepted.sources.find((item) => item.id === 'source-1');
   assert.equal(acceptedSource.freshnessState, 'current');
   assert.equal(acceptedSource.verificationState, 'unverified');
-  assert.equal(acceptedSource.contentHash, 'b'.repeat(64));
+  assert.equal(acceptedSource.contentHash, 'a'.repeat(64));
+  assert.equal(acceptedSource.observedContentHash, 'b'.repeat(64));
   repository.setSourceVerification({ id: 'source-1', verificationState: 'verified' });
   assert.equal(repository.getSource('source-1').verificationState, 'verified');
 });

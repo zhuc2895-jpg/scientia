@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   buildSourceRemovalCheckpointMetadata,
+  buildSourceRevisionCheckpointMetadata,
   classifyReferenceInput,
   findDuplicateSource,
   normalizeDoi,
@@ -178,5 +179,20 @@ test('source removal checkpoint carries the complete decision contract', () => {
   assert.match(metadata.risk, /Active Source Set/);
   assert.ok(metadata.options.length >= 2);
   assert.match(metadata.recommendation, /preserve|保留/i);
+  assert.match(metadata.estimatedTimeCost, /local|本地/i);
+});
+
+test('source revision checkpoint carries the complete decision contract', () => {
+  const metadata = buildSourceRevisionCheckpointMetadata({
+    id: 'source-1',
+    title: 'A Reproducible Trial',
+    observedContentHash: 'b'.repeat(64),
+  });
+
+  assert.equal(metadata.sourceId, 'source-1');
+  assert.match(metadata.trigger, /changed|变化/i);
+  assert.match(metadata.risk, /Evidence/);
+  assert.ok(metadata.options.length >= 2);
+  assert.match(metadata.recommendation, /verify|核验/i);
   assert.match(metadata.estimatedTimeCost, /local|本地/i);
 });

@@ -183,7 +183,7 @@ class ResearchRuntimeTests(unittest.TestCase):
             "Summarize the evidence.",
             [],
             1,
-            new_evidence_entries=[{"source": "paper.md"}],
+            new_evidence_entries=[{"source": "paper.md", "citationNumber": 1}],
             registered_sources=registered,
             active_sources=active,
         )
@@ -310,10 +310,16 @@ class ResearchRuntimeTests(unittest.TestCase):
             "Prior work [2] supports this. Limitation: one source.",
             "Summarize the evidence.",
             [],
-            2,
-            new_evidence_entries=[{"source": "paper.md"}, {"source": "paper.md"}],
-            registered_sources=[{"localLocator": ".science/sources/paper.md"}],
-            active_sources=[{"localLocator": ".science/sources/paper.md"}],
+            1,
+            new_evidence_entries=[{"source": "paper.md", "citationNumber": 1}],
+            registered_sources=[
+                {"localLocator": ".science/sources/paper.md"},
+                {"localLocator": ".science/sources/second.md"},
+            ],
+            active_sources=[
+                {"localLocator": ".science/sources/paper.md"},
+                {"localLocator": ".science/sources/second.md"},
+            ],
         )
         self.assertTrue(duplicate_evidence_number["blocking"])
 
@@ -354,6 +360,16 @@ class ResearchRuntimeTests(unittest.TestCase):
             active_sources=url_source,
         )
         self.assertFalse(url_fragment["blocking"])
+        url_parenthesized = assess_result(
+            "See (https://example.com/paper). Limitation: one source.",
+            "Summarize the evidence.",
+            [],
+            1,
+            new_evidence_entries=[{"source": "paper.md"}],
+            registered_sources=url_source,
+            active_sources=url_source,
+        )
+        self.assertFalse(url_parenthesized["blocking"])
 
         path_collision = assess_result(
             "Observed in [1]. Limitation: one source.",

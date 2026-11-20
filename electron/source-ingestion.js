@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import {
   buildBibTeX,
+  buildBibTeXKey,
   buildCslJson,
   classifyReferenceInput,
   normalizeSourceYear,
@@ -113,7 +114,10 @@ export async function ingestSourceFiles({
         localLocator: parsed.length > 1 ? `${locator}#entry-${index + 1}` : locator,
         contentHash: fileHash,
         acquiredAt,
-        citekey: entry.metadata?.citationKey || null,
+        citekey: entry.metadata?.citationKey || buildBibTeXKey({
+          ...entry,
+          kind: entry.kind || kind,
+        }),
         bibtex: entry.kind === 'bibtex' && entry.raw ? entry.raw : buildBibTeX({
           ...entry,
           kind: entry.kind || kind,
@@ -198,7 +202,13 @@ export async function ingestReference({
     localLocator: relativeLocator(workspacePath, destination),
     contentHash,
     acquiredAt,
-    citekey: null,
+    citekey: buildBibTeXKey({
+      kind: classified.kind,
+      title: normalizedTitle,
+      year: normalizedYear,
+      doi: classified.kind === 'doi' ? classified.value : null,
+      url: classified.kind === 'url' ? classified.value : null,
+    }),
     bibtex: buildBibTeX({
       kind: classified.kind,
       title: normalizedTitle,

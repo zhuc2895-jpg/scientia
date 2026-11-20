@@ -131,13 +131,33 @@ export function buildSourceRemovalCheckpointMetadata(source = {}) {
   };
 }
 
-export function buildBibTeX(source = {}) {
+export function buildSourceRevisionCheckpointMetadata(source = {}) {
+  return {
+    sourceId: String(source.id || ''),
+    title: String(source.title || ''),
+    observedContentHash: String(source.observedContentHash || ''),
+    trigger: 'The Source content changed and the observed revision must be accepted.',
+    risk: 'Accepted content invalidates prior Evidence and requires re-verification before citation.',
+    options: ['Accept the observed Source revision', 'Cancel and keep the previous version stale'],
+    recommendation: 'Accept only if the new content is the intended source, then verify it before citation.',
+    estimatedTimeCost: 'Local metadata update; seconds, no model cost.',
+  };
+}
+
+export function buildBibTeXKey(source = {}) {
   const title = String(source.title || '').trim();
   const year = normalizeSourceYear(source.year);
   const authors = (Array.isArray(source.authors) ? source.authors : []).map((author) => String(author || '').trim()).filter(Boolean);
   const firstFamily = (authors[0] || 'source').split(/\s+/).pop().replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'source';
   const titleWord = title.split(/\s+/).find((word) => word.length > 3)?.replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'record';
-  const key = String(source.citekey || `${firstFamily}${year || 'nd'}${titleWord}`).replace(/[^A-Za-z0-9:_-]/g, '');
+  return String(source.citekey || `${firstFamily}${year || 'nd'}${titleWord}`).replace(/[^A-Za-z0-9:_-]/g, '');
+}
+
+export function buildBibTeX(source = {}) {
+  const title = String(source.title || '').trim();
+  const year = normalizeSourceYear(source.year);
+  const authors = (Array.isArray(source.authors) ? source.authors : []).map((author) => String(author || '').trim()).filter(Boolean);
+  const key = buildBibTeXKey(source);
   const entryType = source.kind === 'doi' || source.entryType === 'article' || source.entryType === 'JOUR'
     ? 'article'
     : source.entryType === 'book' || source.entryType === 'BOOK'

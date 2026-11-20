@@ -454,7 +454,31 @@ async function acceptProjectSourceRevision(id) {
   if (!isWithin(workspace, sourcePath)) throw new Error('Source local locator 不在当前 Research Workspace 中。');
   const bytes = await fs.readFile(sourcePath);
   const contentHash = createHash('sha256').update(bytes).digest('hex');
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: 'Accept Source Revision',
+    message: `Accept the changed content for “${source.title}”?`,
+    detail: 'Prior Evidence remains invalid until the Source is re-verified.',
+    buttons: ['Cancel', 'Accept revision'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  const decision = confirmation.response === 1 ? 'approved' : 'cancelled';
+  productRepository.recordCheckpoint({
+    type: 'source-revision-accepted',
+    decision,
+    rationale: decision === 'approved'
+      ? 'User accepted the observed Source revision.'
+      : 'User cancelled accepting the observed Source revision.',
+    metadata: buildSourceRevisionCheckpointMetadata({ ...source, observedContentHash: contentHash }),
+  });
+  if (decision !== 'approved') throw new Error('User cancelled Source revision acceptance.');
   return productRepository.acceptSourceRevision({ id, contentHash });
+}
+
+async function setProjectSourceVerification(id, verificationState) {
+  return productRepository.setSourceVerification({ id, verificationState });
 }
 
 async function removeProjectSource(id) {
@@ -877,6 +901,7 @@ function installIpc() {
   ipcMain.handle('sources:remove', async (_event, id) => removeProjectSource(id));
   ipcMain.handle('sources:refresh-integrity', async (_event, id) => refreshProjectSource(id));
   ipcMain.handle('sources:accept-revision', async (_event, id) => acceptProjectSourceRevision(id));
+  ipcMain.handle('sources:set-verification', async (_event, payload) => setProjectSourceVerification(payload?.id, payload?.verificationState));
   ipcMain.handle('agent:run', async (event, payload) => runAgent(payload, event.sender));
   ipcMain.handle('agent:cancel', async (_event, runId) => cancelAgent(runId));
   ipcMain.handle('research:recover-run', async (_event, payload) => {

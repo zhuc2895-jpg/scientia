@@ -389,7 +389,7 @@ export function openProductRepository({ databasePath }) {
     'UPDATE sources SET observed_content_hash = ?, freshness_state = ?, verification_state = ? WHERE id = ? AND project_id = ?',
   );
   const acceptSourceRevisionStatement = database.prepare(
-    'UPDATE sources SET content_hash = ?, observed_content_hash = ?, freshness_state = \'current\', verification_state = \'unverified\' WHERE id = ? AND project_id = ?',
+    'UPDATE sources SET observed_content_hash = ?, freshness_state = \'current\', verification_state = \'unverified\' WHERE id = ? AND project_id = ?',
   );
 
   let closed = false;
@@ -1066,16 +1066,7 @@ export function openProductRepository({ databasePath }) {
     const timestamp = new Date().toISOString();
     database.exec('BEGIN IMMEDIATE');
     try {
-      acceptSourceRevisionStatement.run(normalizedHash, normalizedHash, id, project.id);
-      insertCheckpoint.run(
-        randomUUID(),
-        project.id,
-        'source-revision-accepted',
-        'accepted',
-        'User accepted the observed Source content as the new current revision.',
-        JSON.stringify({ sourceId: id, contentHash: normalizedHash, acceptedAt: timestamp }),
-        timestamp,
-      );
+      acceptSourceRevisionStatement.run(normalizedHash, id, project.id);
       database.exec('COMMIT');
     } catch (error) {
       database.exec('ROLLBACK');
@@ -1142,7 +1133,10 @@ export function openProductRepository({ databasePath }) {
     if (!current) throw new Error('Source Record 不存在或不属于当前 Research Project。');
     const normalizedHash = typeof contentHash === 'string' ? contentHash.trim().toLowerCase() : '';
     if (!/^[a-f0-9]{64}$/.test(normalizedHash)) throw new Error('Source content hash 无效。');
-    const changed = normalizedHash !== current.content_hash;
+    const baselineHash = current.freshness_state === 'current'
+      ? (current.observed_content_hash || current.content_hash)
+      : current.content_hash;
+    const changed = normalizedHash !== baselineHash;
     const verificationState = changed ? 'unverified' : (VERIFICATION_STATES.has(current.verification_state) ? current.verification_state : 'unverified');
     const timestamp = new Date().toISOString();
     database.exec('BEGIN IMMEDIATE');

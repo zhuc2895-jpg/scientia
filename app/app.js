@@ -1070,6 +1070,9 @@ function renderSourceLibrary() {
         ${source.freshnessState === 'stale'
           ? `<button type="button" class="source-refresh" data-accept-source="${escapeHTML(source.id)}" title="接受当前内容版本并重新核验" aria-label="接受 ${escapeHTML(source.title)} 的新版本">✓</button>`
           : `<button type="button" class="source-refresh" data-refresh-source="${escapeHTML(source.id)}" title="刷新来源完整性" aria-label="刷新 ${escapeHTML(source.title)}">↻</button>`}
+        ${source.freshnessState !== 'stale' && source.verificationState !== 'verified'
+          ? `<button type="button" class="source-refresh" data-verify-source="${escapeHTML(source.id)}" title="标记为已验证" aria-label="验证 ${escapeHTML(source.title)}">◎</button>`
+          : ''}
         <button type="button" class="source-remove" data-remove-source="${escapeHTML(source.id)}" title="从 Source Library 移除" aria-label="移除 ${escapeHTML(source.title)}">×</button>
       </div>
     `;
@@ -2124,6 +2127,20 @@ function bindEvents() {
     if (checkbox) void setConversationSourceActive(checkbox.dataset.sourceId, checkbox.checked);
   });
   els.sourceList.addEventListener('click', async (event) => {
+    const verifyButton = event.target.closest('[data-verify-source]');
+    if (verifyButton) {
+      try {
+        applyProductState(await bridge.sourceSetVerification({
+          id: verifyButton.dataset.verifySource,
+          verificationState: 'verified',
+        }));
+        renderAll();
+        showToast('Source Record 已标记为已验证。');
+      } catch (error) {
+        showToast(error.message || '无法验证 Source Record。', 5000);
+      }
+      return;
+    }
     const acceptButton = event.target.closest('[data-accept-source]');
     if (acceptButton) {
       try {
@@ -2637,6 +2654,11 @@ function createPreviewBridge() {
     async sourceAcceptRevision(id) {
       const source = previewSources.find((item) => item.id === id);
       if (source) { source.freshnessState = 'current'; source.verificationState = 'unverified'; }
+      return previewProductState();
+    },
+    async sourceSetVerification({ id, verificationState }) {
+      const source = previewSources.find((item) => item.id === id);
+      if (source) source.verificationState = verificationState;
       return previewProductState();
     },
     async sourceRemove(id) {

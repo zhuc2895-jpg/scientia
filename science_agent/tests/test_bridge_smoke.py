@@ -67,7 +67,8 @@ class BridgeSmokeTests(unittest.TestCase):
                             "locator": "line 1",
                             "quote": "A source-backed observation.",
                             "confidence": "high",
-                            "addedAt": "2026-11-16T00:00:00+00:00"
+                            "addedAt": "2026-11-16T00:00:00+00:00",
+                            "citationNumber": 1
                         }) + "\\n", encoding="utf-8")
                         return Result()
             """), encoding="utf-8")
