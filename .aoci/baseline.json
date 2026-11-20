@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T15:07:39Z",
-  "updated_at": "2026-11-20T08:48:10Z",
+  "updated_at": "2026-11-20T09:13:34Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -7457,9 +7457,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "dc2c309cdf2ea855aa04a19d7c862370a6ddc484a13a55ca70c1678a241334d6",
-      "size": 20908,
-      "normalized_sha256": "dc2c309cdf2ea855aa04a19d7c862370a6ddc484a13a55ca70c1678a241334d6"
+      "sha256": "c11e924e1e7a32a621db3c25fead715cd1a0aebe2c90830c98ebee609f0ec69f",
+      "size": 20969,
+      "normalized_sha256": "c11e924e1e7a32a621db3c25fead715cd1a0aebe2c90830c98ebee609f0ec69f"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -7641,9 +7641,9 @@
     },
     "electron/main.js": {
       "role": "index",
-      "sha256": "a96271840c4cf553cc675ea3de09d4a0f99be2fd61b5a29725afcc5d92d6bb3d",
-      "size": 38990,
-      "normalized_sha256": "a96271840c4cf553cc675ea3de09d4a0f99be2fd61b5a29725afcc5d92d6bb3d"
+      "sha256": "afe79e8e0433f84b68d42b97e6274ffe64d2ae3ad17d9e822fa13e41a2b94fbd",
+      "size": 38589,
+      "normalized_sha256": "afe79e8e0433f84b68d42b97e6274ffe64d2ae3ad17d9e822fa13e41a2b94fbd"
     },
     "electron/native-secret-input.js": {
       "role": "index",
@@ -7665,9 +7665,9 @@
     },
     "electron/product-repository.js": {
       "role": "index",
-      "sha256": "005656e0deef956eae9fe41a83994907668a2be9657ddd322c66e69ef4fd708e",
-      "size": 49050,
-      "normalized_sha256": "005656e0deef956eae9fe41a83994907668a2be9657ddd322c66e69ef4fd708e"
+      "sha256": "2a8d5cc1d292973dbda84c120d0fcfa16a5f85d3ac1828cb51e3e900213ea989",
+      "size": 49619,
+      "normalized_sha256": "2a8d5cc1d292973dbda84c120d0fcfa16a5f85d3ac1828cb51e3e900213ea989"
     },
     "electron/project-workspace.js": {
       "role": "index",
@@ -7731,9 +7731,9 @@
     },
     "electron/tests/product-repository.test.mjs": {
       "role": "observe",
-      "sha256": "bf4c76cee4d03252d32072f6a203c8328961bb773ee2929b251504e8b8eb5dee",
-      "size": 47107,
-      "normalized_sha256": "bf4c76cee4d03252d32072f6a203c8328961bb773ee2929b251504e8b8eb5dee"
+      "sha256": "768d4e5eb68e737696b1f1a2855d1811041892f994a546db2d3621775eba964d",
+      "size": 47581,
+      "normalized_sha256": "768d4e5eb68e737696b1f1a2855d1811041892f994a546db2d3621775eba964d"
     },
     "electron/tests/project-workspace.test.mjs": {
       "role": "observe",
@@ -7833,9 +7833,9 @@
     },
     "science_agent/research_runtime.py": {
       "role": "index",
-      "sha256": "25e9c9db5f27895f4afcb4bf63ee47a420c21d7b578054f9c99940356f4ffef9",
-      "size": 32720,
-      "normalized_sha256": "25e9c9db5f27895f4afcb4bf63ee47a420c21d7b578054f9c99940356f4ffef9"
+      "sha256": "f58972c07c880bcce569e2bff3310c6b213bee9d8e8e34efafe8219e232359bf",
+      "size": 33492,
+      "normalized_sha256": "f58972c07c880bcce569e2bff3310c6b213bee9d8e8e34efafe8219e232359bf"
     },
     "science_agent/system_prompt.md": {
       "role": "index",
@@ -7856,9 +7856,9 @@
     },
     "science_agent/tests/test_research_runtime.py": {
       "role": "observe",
-      "sha256": "75710032ed9cd3d4dd6233a8f8b7715cfcdca0c0f927063a545e184b91e66c07",
-      "size": 19480,
-      "normalized_sha256": "75710032ed9cd3d4dd6233a8f8b7715cfcdca0c0f927063a545e184b91e66c07"
+      "sha256": "5cdf2bccfc0a6d3074853f4d6255296687f1e1a00d648820fc81f2aee31ac393",
+      "size": 22940,
+      "normalized_sha256": "5cdf2bccfc0a6d3074853f4d6255296687f1e1a00d648820fc81f2aee31ac393"
     },
     "scripts/brace_check.py": {
       "role": "index",
