@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T15:07:39Z",
-  "updated_at": "2026-11-21T05:45:57Z",
+  "updated_at": "2026-11-21T05:53:55Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -7457,9 +7457,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "216a8a4989720f9582c149ff3463c6e3c1ee40f9faf705a15efde95d2d9a6dd4",
-      "size": 22998,
-      "normalized_sha256": "216a8a4989720f9582c149ff3463c6e3c1ee40f9faf705a15efde95d2d9a6dd4"
+      "sha256": "5abcd9031fd28cee1329dbe9267cb713280460a85c5d1ad43a10da76d7742769",
+      "size": 23003,
+      "normalized_sha256": "5abcd9031fd28cee1329dbe9267cb713280460a85c5d1ad43a10da76d7742769"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -7647,9 +7647,9 @@
     },
     "electron/main.js": {
       "role": "index",
-      "sha256": "15fda1210536446ab4fd320f6398809d403ba6ca0e806abaa8fe482aa34c6339",
-      "size": 51107,
-      "normalized_sha256": "b3fa9010c3dfebf114866f2f7002487885fcf04092703d2a16d48884ac0455ad"
+      "sha256": "f317b3c4b57af459c5cf0b93e0443706bbb4c766e52758288823b230b88559f1",
+      "size": 51244,
+      "normalized_sha256": "051a108220d0d4dbc65f4598b40a276fa88f49a219fa3216639b9802231873a6"
     },
     "electron/native-secret-input.js": {
       "role": "index",
@@ -7755,9 +7755,9 @@
     },
     "electron/tests/product-repository.test.mjs": {
       "role": "observe",
-      "sha256": "7befe03b95e811b6947b79d8b603630d9ed1bf95222d9197a44041c557928694",
-      "size": 63691,
-      "normalized_sha256": "4061ec82e3706a589f1a67fb5de970dcd2d654bada3945043af41d7767ed7117"
+      "sha256": "162a78b3343090e1a745102579ec23d212648d4c21da805dce6b3c0e9d93c3df",
+      "size": 64940,
+      "normalized_sha256": "f25d680fb7f528d5daf0dee8f2f996919d0c86e37dc0e8cb88590f2f3d78bba3"
     },
     "electron/tests/project-workspace.test.mjs": {
       "role": "observe",
@@ -7857,9 +7857,9 @@
     },
     "science_agent/citation_audit.py": {
       "role": "index",
-      "sha256": "9de2dc4006f40ba7b7652be80c2c0bfad8a7e28a3c2b2b2758fa4b7298a6b223",
-      "size": 19640,
-      "normalized_sha256": "d07652146324ba487c64ac7556be9a89ccbe7f212dc1261354149156bcf907f7"
+      "sha256": "db694b39114304f4294438bcdd4b1e63c2e71c57a5906b73c51fdb56dbffeb8a",
+      "size": 20046,
+      "normalized_sha256": "2acbcba6ef37d63692bca94291f0ae33da721928656ed3b7b4f10b98e5d2e362"
     },
     "science_agent/daemon.py": {
       "role": "index",
@@ -7898,9 +7898,9 @@
     },
     "science_agent/tests/test_citation_audit.py": {
       "role": "observe",
-      "sha256": "5d524245cca5eabda6de6f105f102b18e54d98d5ebfe0a7f8e8e7481a538484d",
-      "size": 19456,
-      "normalized_sha256": "900da9300a33851ab3a18557c29931a8a63cd5bdeee36873bf439eb8b4a2ca4d"
+      "sha256": "06d8a6a5869dcb565f3e5cae36c4b6eb18e67ceffd657b2094bdaa5a85b13379",
+      "size": 21011,
+      "normalized_sha256": "fd3bbf46e19ce071badc0e2cd172a926c0c45a4b3c2121a7718b9db10d0a5d82"
     },
     "science_agent/tests/test_research_runtime.py": {
       "role": "observe",
