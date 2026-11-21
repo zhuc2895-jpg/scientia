@@ -396,13 +396,18 @@ class CitationAuditTests(unittest.TestCase):
             id="first",
             metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "First result is supported", "contentHash": "a" * 64}},
         )
+        first_evidence = verified_evidence(
+            ".science/sources/first.md",
+            citationNumber=1,
+            claim="First result is supported",
+        )
         second = verified_source(
             ".science/sources/second.md",
             id="second",
             metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Second result is rejected", "contentHash": "a" * 64}},
         )
         evidence = [
-            verified_evidence(".science/sources/first.md", citationNumber=1, claim="First result is supported"),
+            first_evidence,
             verified_evidence(".science/sources/second.md", citationNumber=2, claim="Second result is rejected"),
         ]
         result = audit_citations(
@@ -451,31 +456,27 @@ class CitationAuditTests(unittest.TestCase):
             id="first",
             metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "First result is supported", "contentHash": "a" * 64}},
         )
-        second = verified_source(
-            ".science/sources/second.md",
-            id="second",
-            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Second result is rejected", "contentHash": "a" * 64}},
+        first_evidence = verified_evidence(
+            ".science/sources/first.md",
+            citationNumber=1,
+            claim="First result is supported",
         )
-        evidence = [
-            verified_evidence(".science/sources/first.md", citationNumber=1, claim="First result is supported"),
-            verified_evidence(".science/sources/second.md", citationNumber=2, claim="Second result is rejected"),
-        ]
-        for text in (
-            "First result is supported [1], and second result is rejected [2].",
-            "First result is supported [1], second result is rejected [2].",
-            "First result is supported [1] while second result is rejected [2].",
-            "First result is supported [1] and second result is rejected [2].",
-            "First result is supported [1], and second result, however, is rejected [2].",
-        ):
+        cases = (
+            ("First result is supported [1], and second result is rejected [2].", "Second result is rejected"),
+            ("First result is supported [1], second result is rejected [2].", "Second result is rejected"),
+            ("First result is supported [1] while second result is rejected [2].", "Second result is rejected"),
+            ("First result is supported [1] and second result is rejected [2].", "Second result is rejected"),
+            ("First result is supported [1], and second result, however, is rejected [2].", "Second result, however, is rejected"),
+        )
+        for text, second_claim in cases:
             with self.subTest(text=text):
-                second_claim = "Second result, however, is rejected" if "however" in text else "Second result is rejected"
                 selected_second = verified_source(
                     ".science/sources/second.md",
                     id="second",
                     metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": second_claim, "contentHash": "a" * 64}},
                 )
                 selected_evidence = [
-                    evidence[0],
+                    first_evidence,
                     verified_evidence(".science/sources/second.md", citationNumber=2, claim=second_claim),
                 ]
                 result = audit_citations(
@@ -528,6 +529,48 @@ class CitationAuditTests(unittest.TestCase):
         )
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
+    def test_plain_conjunction_before_uncited_lead_binds_the_cited_clause(self) -> None:
+        source = verified_source(
+            ".science/sources/paper.md",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Beta was confirmed", "contentHash": "a" * 64}},
+        )
+        evidence = verified_evidence(
+            ".science/sources/paper.md",
+            citationNumber=1,
+            claim="Beta was confirmed",
+        )
+        result = audit_citations(
+            text="Alpha was observed and beta was confirmed [1]. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[evidence],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
+
+    def test_internal_and_does_not_split_a_coordinated_noun_phrase(self) -> None:
+        for claim in (
+            "The report, and appendix support the result",
+            "The report and appendix support the result",
+            "The finding and appendix support the result",
+        ):
+            with self.subTest(claim=claim):
+                source = verified_source(
+                    ".science/sources/paper.md",
+                    metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": claim, "contentHash": "a" * 64}},
+                )
+                evidence = verified_evidence(
+                    ".science/sources/paper.md",
+                    citationNumber=1,
+                    claim=claim,
+                )
+                result = audit_citations(
+                    text=f"{claim} [1]. Limitation: x.",
+                    active_sources=[source],
+                    registered_sources=[source],
+                    evidence_entries=[evidence],
+                )
+                self.assertEqual(result["outOfBoundaryCitations"], [])
+
     def test_coordination_search_stops_at_hard_sentence_boundaries(self) -> None:
         first = verified_source(
             ".science/sources/first.md",
@@ -550,6 +593,31 @@ class CitationAuditTests(unittest.TestCase):
             evidence_entries=evidence,
         )
         self.assertEqual(result["outOfBoundaryCitations"], [])
+
+    def test_period_semicolon_and_newline_stop_coordination_search(self) -> None:
+        first = verified_source(
+            ".science/sources/first.md",
+            id="first",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Alpha was supported", "contentHash": "a" * 64}},
+        )
+        second = verified_source(
+            ".science/sources/second.md",
+            id="second",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Beta was confirmed", "contentHash": "a" * 64}},
+        )
+        evidence = [
+            verified_evidence(".science/sources/first.md", citationNumber=1, claim="Alpha was supported"),
+            verified_evidence(".science/sources/second.md", citationNumber=2, claim="Beta was confirmed"),
+        ]
+        for boundary in (". ", "; ", "\n"):
+            with self.subTest(boundary=repr(boundary)):
+                result = audit_citations(
+                    text=f"Alpha was supported [1]{boundary}Beta was confirmed [2]. Limitation: x.",
+                    active_sources=[first, second],
+                    registered_sources=[first, second],
+                    evidence_entries=evidence,
+                )
+                self.assertEqual(result["outOfBoundaryCitations"], [])
 
 
 if __name__ == "__main__":
