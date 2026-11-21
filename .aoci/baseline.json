@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T15:07:39Z",
-  "updated_at": "2026-11-21T15:39:55Z",
+  "updated_at": "2026-11-21T15:55:53Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -7457,9 +7457,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "ceb7970cfe4e53047aa4c70c21aa657854e788e15cd0f4f02339069a0bfe23d7",
-      "size": 23350,
-      "normalized_sha256": "ceb7970cfe4e53047aa4c70c21aa657854e788e15cd0f4f02339069a0bfe23d7"
+      "sha256": "239b5c7c74c4ec198ad8a60c49be5715ba9f0845bce966540049a4b92ed3fafe",
+      "size": 23110,
+      "normalized_sha256": "239b5c7c74c4ec198ad8a60c49be5715ba9f0845bce966540049a4b92ed3fafe"
     },
     "aoci.database.txt": {
       "role": "index",
@@ -7857,9 +7857,9 @@
     },
     "science_agent/citation_audit.py": {
       "role": "index",
-      "sha256": "8edac3114b915e8cc77cf1a92a8b89ea1ae0dfbeefedf0e2696926ffaa5d2c51",
-      "size": 22181,
-      "normalized_sha256": "98b50fbd7e7d5f5535287206115fa0f3c344f19aacfaa6cef3df689255217e20"
+      "sha256": "c07b6b9c90f89d2475f3cac8c7818ef849afa85e0e8a704d50f6a9eecff761e1",
+      "size": 19273,
+      "normalized_sha256": "d280a4eaa78009ed8458e6808143ffd1cff00968d66a1b07c1d7e371c9859e4f"
     },
     "science_agent/daemon.py": {
       "role": "index",
@@ -7898,9 +7898,9 @@
     },
     "science_agent/tests/test_citation_audit.py": {
       "role": "observe",
-      "sha256": "0bc2456beba77ebb800713f7fa4757585c4fe5c47fccf1661ff0f35ec8087e4f",
-      "size": 30309,
-      "normalized_sha256": "2f8b1832e3ae99dbf87bbc8b03057330cd1b2442fc7e65f68180b2aea03062d9"
+      "sha256": "bc8ba9c6b91eb6669f714c34364cd3f3ef4e09172bebced0bcdbe8820e282b3a",
+      "size": 28072,
+      "normalized_sha256": "d46333598e2f1d6740f84f5d2fc009953e31c83d181f93b11256f0842d3282c2"
     },
     "science_agent/tests/test_research_runtime.py": {
       "role": "observe",
