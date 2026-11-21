@@ -390,5 +390,60 @@ class CitationAuditTests(unittest.TestCase):
         self.assertEqual(result["outOfBoundaryCitations"], ["[1]"])
 
 
+    def test_multiple_citations_in_one_sentence_bind_to_their_local_claims(self) -> None:
+        first = verified_source(
+            ".science/sources/first.md",
+            id="first",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "First result is supported", "contentHash": "a" * 64}},
+        )
+        second = verified_source(
+            ".science/sources/second.md",
+            id="second",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Second result is rejected", "contentHash": "a" * 64}},
+        )
+        evidence = [
+            verified_evidence(".science/sources/first.md", citationNumber=1, claim="First result is supported"),
+            verified_evidence(".science/sources/second.md", citationNumber=2, claim="Second result is rejected"),
+        ]
+        result = audit_citations(
+            text="First result is supported [1]; second result is rejected [2]. Limitation: x.",
+            active_sources=[first, second],
+            registered_sources=[first, second],
+            evidence_entries=evidence,
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
+
+    def test_et_al_abbreviation_does_not_end_the_claim_sentence(self) -> None:
+        source = verified_source(
+            ".science/sources/paper.md",
+            authors=["Jane Smith"],
+            year=2023,
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Smith et al. report the result is supported", "contentHash": "a" * 64}},
+        )
+        evidence = verified_evidence(
+            ".science/sources/paper.md",
+            citationNumber=1,
+            claim="Smith et al. report the result is supported",
+        )
+        result = audit_citations(
+            text="Smith et al. report the result is supported [1]. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[evidence],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
+
+    def test_doi_label_is_removed_with_the_citation_token(self) -> None:
+        source = verified_source(".science/sources/paper.md", doi="10.1000/abc")
+        evidence = verified_evidence(".science/sources/paper.md", claim="The result is supported")
+        result = audit_citations(
+            text="The result is supported (DOI 10.1000/abc). Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[evidence],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

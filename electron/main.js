@@ -470,6 +470,12 @@ async function authorizeExternalSourceFetch(actionLabel, { action, payload } = {
     });
     throw new Error('User cancelled external source retrieval.');
   }
+  productRepository.resolveCheckpoint({
+    id: pendingCheckpoint.id,
+    decision: 'approved',
+    rationale: `User confirmed external source retrieval for ${actionLabel}.`,
+    metadata: { executionState: 'pending-execution' },
+  });
   return pendingCheckpoint.id;
 }
 
@@ -507,6 +513,7 @@ async function refreshProjectSource(id, { skipAuthorization = false } = {}) {
       id: authorizationCheckpointId,
       decision: 'approved',
       rationale: 'External source refresh completed after user approval.',
+      metadata: { executionState: 'completed' },
     });
   }
   if (
@@ -567,6 +574,19 @@ async function resolveProjectSourceCheckpoint({ id, decision, rationale } = {}) 
       productRepository.resolveCheckpoint({ id, decision, rationale });
       return productRepository.loadState();
     }
+    const state = productRepository.loadState();
+    const policyDecision = evaluateResearchRunPolicy({
+      stageKey: null,
+      charter: state.project?.charter,
+      sensitiveTransmissionConfirmed: true,
+    });
+    if (!policyDecision.allowed) throw new Error(policyDecision.message);
+    productRepository.resolveCheckpoint({
+      id,
+      decision: 'approved',
+      rationale,
+      metadata: { executionState: 'pending-execution' },
+    });
     const action = checkpoint.metadata?.action;
     const payload = checkpoint.metadata?.payload || {};
     let resumedState;
@@ -581,6 +601,7 @@ async function resolveProjectSourceCheckpoint({ id, decision, rationale } = {}) 
       id,
       decision: 'approved',
       rationale: 'External source action resumed and completed after user approval.',
+      metadata: { executionState: 'completed' },
     });
     return resumedState;
   }
@@ -723,6 +744,7 @@ async function importSourceReference(payload = {}, { skipAuthorization = false }
       id: authorizationCheckpointId,
       decision: 'approved',
       rationale: 'External source registration completed after user approval.',
+      metadata: { executionState: 'completed' },
     });
   }
   return result;

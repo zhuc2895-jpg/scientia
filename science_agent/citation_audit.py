@@ -8,6 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 CITATION_PATTERN = (
     r"https?://[^\s<>`\"']+"
     r"|doi:\s*10\.\d{4,9}/\S+"
+    r"|DOI\s+10\.\d{4,9}/\S+"
     r"|\b10\.\d{4,9}/[^\s<>()]+"
     r"|\[[0-9]+(?:\s*[,–-]\s*[0-9]+)*\]"
     r"|\([A-Z][A-Za-z'’-]+(?:\s+(?:et al\.|and\s+[A-Z][A-Za-z'’-]+))?,\s*(?:19|20)\d{2}[a-z]?\)"
@@ -141,22 +142,47 @@ def _normalize_claim(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip().strip(".,;:!?").lower()
 
 
+def _is_abbreviation_period(text: str, index: int) -> bool:
+    prefix = text[max(0, index - 8):index + 1].lower()
+    return any(prefix.endswith(abbreviation) for abbreviation in ("et al.", "e.g.", "i.e.", "dr.", "mr.", "ms.", "prof.", "vs."))
+
+
+def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, int]:
+    left = 0
+    for index in range(start - 1, -1, -1):
+        char = text[index]
+        if char in ";\n" or (char in ".!?" and not (char == "." and _is_abbreviation_period(text, index))):
+            left = index + 1
+            break
+        if text[max(0, index - 5):index + 1].lower().endswith(", but"):
+            left = index + 1
+            break
+        if text[max(0, index - 8):index + 1].lower().endswith(", while"):
+            left = index + 1
+            break
+    right = len(text)
+    for index in range(end, len(text)):
+        char = text[index]
+        if char in ";\n" or (char in ".!?" and not (char == "." and _is_abbreviation_period(text, index))):
+            right = index
+            break
+        if text[index:index + 6].lower() == ", but ":
+            right = index
+            break
+        if text[index:index + 8].lower() == ", while ":
+            right = index
+            break
+    return left, right
+
+
 def _citation_claim_text(text: str, start: int, end: int) -> str:
-    left_break = max(text.rfind(mark, 0, start) for mark in ".!?\n")
     boundary_end = end
-    while boundary_end > start and text[boundary_end - 1] in ".,;:":
+    while boundary_end > start and text[boundary_end - 1] in ".,;:)":
         boundary_end -= 1
-    right_candidates = [
-        index for index in (
-            text.find(".", boundary_end),
-            text.find("!", boundary_end),
-            text.find("?", boundary_end),
-            text.find("\n", boundary_end),
-        ) if index >= 0
-    ]
-    right_break = min(right_candidates) if right_candidates else len(text)
-    sentence = text[left_break + 1:right_break]
-    sentence = CITATION_RE.sub(" ", sentence)
+    left_break, right_break = _sentence_or_clause_bounds(text, start, boundary_end)
+    before = text[left_break:start]
+    after = text[end:right_break] if end < right_break else ""
+    sentence = CITATION_RE.sub(" ", f"{before} {after}")
     sentence = re.sub(r"[()\[\]]+", " ", sentence)
     return _normalize_claim(sentence)
 
@@ -219,7 +245,7 @@ def _evidence_survives_source_revision(entry: dict[str, Any], source: dict[str, 
     if source.get("verificationState") == "verified":
         locator = str(entry.get("locator") or "").strip().lower()
         quote = re.sub(r"\s+", " ", str(entry.get("quote") or "")).strip()
-        claim = re.sub(r"\s+", " ", str(entry.get("claim") or "")).strip()
+        claim = _normalize_claim(entry.get("claim"))
         source_hash = str(entry.get("sourceContentHash") or "").strip().lower()
         current_hash = str(source.get("observedContentHash") or source.get("contentHash") or "").strip().lower()
         if not locator or not quote or not claim or not source_hash or source_hash != current_hash:
@@ -227,7 +253,7 @@ def _evidence_survives_source_revision(entry: dict[str, Any], source: dict[str, 
         return any(
             locator == str(record.get("locator") or "").strip().lower()
             and quote == re.sub(r"\s+", " ", str(record.get("quote") or "")).strip()
-            and claim == re.sub(r"\s+", " ", str(record.get("claim") or "")).strip()
+            and claim == _normalize_claim(record.get("claim"))
             and source_hash == str(record.get("contentHash") or "").strip().lower()
             for record in _verification_records(source)
         )
@@ -390,6 +416,8 @@ def audit_citations(
         citation = citation_match.group(0)
         citation_claim = _citation_claim_text(citation_text, citation_match.start(), citation_match.end())
         cleaned = citation.rstrip(".,;")
+        if re.match(r"^DOI\s+", cleaned, flags=re.IGNORECASE):
+            cleaned = _doi(cleaned) or cleaned
         if cleaned.lower().startswith(("http://", "https://")):
             while cleaned.endswith(")") and cleaned.count(")") > cleaned.count("("):
                 cleaned = cleaned[:-1]

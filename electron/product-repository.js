@@ -895,9 +895,17 @@ export function openProductRepository({ databasePath }) {
   }
 
   function listPendingCheckpointRecords() {
-    return listCheckpointRecords().filter(
-      (checkpoint) => checkpoint.decision === 'pending' && RECOVERABLE_CHECKPOINT_TYPES.has(checkpoint.type),
-    );
+    return listCheckpointRecords().filter((checkpoint) => (
+      RECOVERABLE_CHECKPOINT_TYPES.has(checkpoint.type)
+      && (
+        checkpoint.decision === 'pending'
+        || (
+          checkpoint.type === 'external-source-fetch'
+          && checkpoint.decision === 'approved'
+          && checkpoint.metadata.executionState === 'pending-execution'
+        )
+      )
+    ));
   }
 
   function resolveSourceCheckpointRecord({ id, decision, rationale } = {}) {
