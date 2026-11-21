@@ -195,15 +195,15 @@ def _local_coordination_boundary(text: str, start: int, sentence_start: int) -> 
         return previous_citation.end() + coordination.end() if coordination else None
     segment = text[sentence_start:start]
     candidates = list(re.finditer(r"(?:,\s*|\s+)(?:and|but|while)\s+", segment, flags=re.IGNORECASE))
-    for candidate in reversed(candidates):
+    for candidate in candidates:
         # ponytail: lexical clause heuristic; use a parser only if broader English coverage matters.
         preceding = segment[:candidate.start()]
         has_predicate = re.search(
-            r"\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|must|shall|should|will|would)\b",
+            r"\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|must|shall|should|will|would|[a-z]+ed)\b",
             preceding,
             flags=re.IGNORECASE,
-        )
-        if has_predicate and "," not in segment[candidate.end():]:
+        ) is not None
+        if has_predicate:
             return sentence_start + candidate.end()
     return None
 

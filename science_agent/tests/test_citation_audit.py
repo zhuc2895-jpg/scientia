@@ -547,6 +547,24 @@ class CitationAuditTests(unittest.TestCase):
         )
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
+    def test_plain_conjunction_accepts_a_lexical_finite_predicate(self) -> None:
+        source = verified_source(
+            ".science/sources/paper.md",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Beta was confirmed", "contentHash": "a" * 64}},
+        )
+        evidence = verified_evidence(
+            ".science/sources/paper.md",
+            citationNumber=1,
+            claim="Beta was confirmed",
+        )
+        result = audit_citations(
+            text="Alpha reported and beta was confirmed [1]. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[evidence],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
+
     def test_internal_and_does_not_split_a_coordinated_noun_phrase(self) -> None:
         for claim in (
             "The report, and appendix support the result",
@@ -570,6 +588,25 @@ class CitationAuditTests(unittest.TestCase):
                     evidence_entries=[evidence],
                 )
                 self.assertEqual(result["outOfBoundaryCitations"], [])
+
+    def test_internal_and_after_an_earlier_predicate_does_not_split_the_noun_phrase(self) -> None:
+        claim = "The report, and appendix support the result"
+        source = verified_source(
+            ".science/sources/paper.md",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": claim, "contentHash": "a" * 64}},
+        )
+        evidence = verified_evidence(
+            ".science/sources/paper.md",
+            citationNumber=1,
+            claim=claim,
+        )
+        result = audit_citations(
+            text=f"Alpha was observed, and {claim} [1]. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[evidence],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
 
     def test_coordination_search_stops_at_hard_sentence_boundaries(self) -> None:
         first = verified_source(
