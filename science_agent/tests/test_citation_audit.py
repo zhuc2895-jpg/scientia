@@ -464,6 +464,8 @@ class CitationAuditTests(unittest.TestCase):
             "First result is supported [1], and second result is rejected [2].",
             "First result is supported [1], second result is rejected [2].",
             "First result is supported [1] while second result is rejected [2].",
+            "First result is supported [1] and second result is rejected [2].",
+            "First result is supported [1], and second result, however, is rejected [2].",
         ):
             with self.subTest(text=text):
                 result = audit_citations(

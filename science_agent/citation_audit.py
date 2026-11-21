@@ -139,7 +139,10 @@ def _authorized_sources(
 
 
 def _normalize_claim(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip().strip(".,;:!?").lower()
+    normalized = re.sub(r"\s+", " ", str(value or "")).strip()
+    normalized = re.sub(r",\s*(?:however|therefore|thus)\s*,", " ", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"[,;:]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip(".-!?").lower()
 
 
 def _is_abbreviation_period(text: str, index: int) -> bool:
@@ -162,12 +165,6 @@ def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, in
         if char in ";\n" or (char in ".!?" and not (char == "." and _is_abbreviation_period(text, index))):
             left = index + 1
             break
-        if char == "," and _has_citation_before(text, index):
-            left = index + 1
-            break
-        if text[max(0, index - 7):index + 1].lower().endswith(" while ") and _has_citation_before(text, index):
-            left = index + 1
-            break
     right = len(text)
     for index in range(end, len(text)):
         char = text[index]
@@ -177,10 +174,24 @@ def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, in
         if char == "," and _has_citation_after(text, index + 1):
             right = index
             break
+        if text[index:index + 5].lower() == " and " and _has_citation_after(text, index + 5):
+            right = index
+            break
         if text[index:index + 7].lower() == " while " and _has_citation_after(text, index + 7):
             right = index
             break
     return left, right
+
+
+def _coordination_after_previous_citation(text: str, start: int) -> int | None:
+    previous = None
+    for match in CITATION_RE.finditer(text, 0, start):
+        previous = match
+    if previous is None:
+        return None
+    segment = text[previous.end():start]
+    coordination = re.search(r"\s*(?:,\s*(?:(?:and|but|while)\s*)?|(?:and|but|while)\s+)", segment, flags=re.IGNORECASE)
+    return previous.end() + coordination.end() if coordination else None
 
 
 def _citation_claim_text(text: str, start: int, end: int) -> str:
@@ -188,6 +199,9 @@ def _citation_claim_text(text: str, start: int, end: int) -> str:
     while boundary_end > start and text[boundary_end - 1] in ".,;:)":
         boundary_end -= 1
     left_break, right_break = _sentence_or_clause_bounds(text, start, boundary_end)
+    coordination_left = _coordination_after_previous_citation(text, start)
+    if coordination_left is not None and coordination_left < start:
+        left_break = max(left_break, coordination_left)
     before = text[left_break:start]
     after = text[end:right_break] if end < right_break else ""
     sentence = CITATION_RE.sub(" ", f"{before} {after}")
