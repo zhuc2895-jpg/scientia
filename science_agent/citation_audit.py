@@ -140,9 +140,7 @@ def _authorized_sources(
 
 def _normalize_claim(value: Any) -> str:
     normalized = re.sub(r"\s+", " ", str(value or "")).strip()
-    normalized = re.sub(r",\s*(?:however|therefore|thus)\s*,", " ", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"[,;:]+", " ", normalized)
-    return re.sub(r"\s+", " ", normalized).strip(".-!?").lower()
+    return normalized.strip(".,;:!?").lower()
 
 
 def _is_abbreviation_period(text: str, index: int) -> bool:
@@ -183,15 +181,24 @@ def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, in
     return left, right
 
 
-def _coordination_after_previous_citation(text: str, start: int) -> int | None:
+def _coordination_after_previous_citation(text: str, start: int, hard_left: int) -> int | None:
     previous = None
-    for match in CITATION_RE.finditer(text, 0, start):
+    for match in CITATION_RE.finditer(text, hard_left, start):
         previous = match
-    if previous is None:
-        return None
-    segment = text[previous.end():start]
-    coordination = re.search(r"\s*(?:,\s*(?:(?:and|but|while)\s*)?|(?:and|but|while)\s+)", segment, flags=re.IGNORECASE)
-    return previous.end() + coordination.end() if coordination else None
+    if previous is not None:
+        segment = text[previous.end():start]
+        coordination = re.search(
+            r"\s*(?:,\s*(?:(?:and|but|while)\s*)?|(?:and|but|while)\s+)",
+            segment,
+            flags=re.IGNORECASE,
+        )
+        return previous.end() + coordination.end() if coordination else None
+    segment = text[hard_left:start]
+    candidates = list(re.finditer(r",\s*(?:and|but|while)\s*", segment, flags=re.IGNORECASE))
+    for candidate in reversed(candidates):
+        if "," not in segment[candidate.end():]:
+            return hard_left + candidate.end()
+    return None
 
 
 def _citation_claim_text(text: str, start: int, end: int) -> str:
@@ -199,9 +206,9 @@ def _citation_claim_text(text: str, start: int, end: int) -> str:
     while boundary_end > start and text[boundary_end - 1] in ".,;:)":
         boundary_end -= 1
     left_break, right_break = _sentence_or_clause_bounds(text, start, boundary_end)
-    coordination_left = _coordination_after_previous_citation(text, start)
+    coordination_left = _coordination_after_previous_citation(text, start, left_break)
     if coordination_left is not None and coordination_left < start:
-        left_break = max(left_break, coordination_left)
+        left_break = coordination_left
     before = text[left_break:start]
     after = text[end:right_break] if end < right_break else ""
     sentence = CITATION_RE.sub(" ", f"{before} {after}")
