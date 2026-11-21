@@ -147,6 +147,14 @@ def _is_abbreviation_period(text: str, index: int) -> bool:
     return any(prefix.endswith(abbreviation) for abbreviation in ("et al.", "e.g.", "i.e.", "dr.", "mr.", "ms.", "prof.", "vs."))
 
 
+def _has_citation_before(text: str, index: int) -> bool:
+    return CITATION_RE.search(text, 0, index) is not None
+
+
+def _has_citation_after(text: str, index: int) -> bool:
+    return CITATION_RE.search(text, index) is not None
+
+
 def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     left = 0
     for index in range(start - 1, -1, -1):
@@ -154,10 +162,10 @@ def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, in
         if char in ";\n" or (char in ".!?" and not (char == "." and _is_abbreviation_period(text, index))):
             left = index + 1
             break
-        if text[max(0, index - 5):index + 1].lower().endswith(", but"):
+        if char == "," and _has_citation_before(text, index):
             left = index + 1
             break
-        if text[max(0, index - 8):index + 1].lower().endswith(", while"):
+        if text[max(0, index - 7):index + 1].lower().endswith(" while ") and _has_citation_before(text, index):
             left = index + 1
             break
     right = len(text)
@@ -166,10 +174,10 @@ def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, in
         if char in ";\n" or (char in ".!?" and not (char == "." and _is_abbreviation_period(text, index))):
             right = index
             break
-        if text[index:index + 6].lower() == ", but ":
+        if char == "," and _has_citation_after(text, index + 1):
             right = index
             break
-        if text[index:index + 8].lower() == ", while ":
+        if text[index:index + 7].lower() == " while " and _has_citation_after(text, index + 7):
             right = index
             break
     return left, right
@@ -183,6 +191,7 @@ def _citation_claim_text(text: str, start: int, end: int) -> str:
     before = text[left_break:start]
     after = text[end:right_break] if end < right_break else ""
     sentence = CITATION_RE.sub(" ", f"{before} {after}")
+    sentence = re.sub(r"^\s*(?:and|but|while)\b\s*", "", sentence, flags=re.IGNORECASE)
     sentence = re.sub(r"[()\[\]]+", " ", sentence)
     return _normalize_claim(sentence)
 

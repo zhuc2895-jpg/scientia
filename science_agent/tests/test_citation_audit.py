@@ -445,5 +445,35 @@ class CitationAuditTests(unittest.TestCase):
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
 
+    def test_comma_and_while_coordination_binds_each_citation_clause(self) -> None:
+        first = verified_source(
+            ".science/sources/first.md",
+            id="first",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "First result is supported", "contentHash": "a" * 64}},
+        )
+        second = verified_source(
+            ".science/sources/second.md",
+            id="second",
+            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Second result is rejected", "contentHash": "a" * 64}},
+        )
+        evidence = [
+            verified_evidence(".science/sources/first.md", citationNumber=1, claim="First result is supported"),
+            verified_evidence(".science/sources/second.md", citationNumber=2, claim="Second result is rejected"),
+        ]
+        for text in (
+            "First result is supported [1], and second result is rejected [2].",
+            "First result is supported [1], second result is rejected [2].",
+            "First result is supported [1] while second result is rejected [2].",
+        ):
+            with self.subTest(text=text):
+                result = audit_citations(
+                    text=f"{text} Limitation: x.",
+                    active_sources=[first, second],
+                    registered_sources=[first, second],
+                    evidence_entries=evidence,
+                )
+                self.assertEqual(result["outOfBoundaryCitations"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1618,3 +1618,40 @@ test('approved external actions remain recoverable until execution completes', (
   });
   assert.equal(repository.listPendingCheckpoints().length, 0);
 });
+
+test('cancelling a pending external action clears it from recovery', (t) => {
+  const { directory, databasePath } = temporaryDatabase();
+  const repository = openTestRepository(databasePath);
+  t.after(() => {
+    repository.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const pending = repository.beginCheckpoint({
+    type: 'external-source-fetch',
+    rationale: 'External fetch.',
+    metadata: {
+      action: 'refresh-source',
+      payload: { sourceId: 'source-1' },
+      trigger: 'Fetch source.',
+      risk: 'Data leaves the machine.',
+      options: ['Fetch', 'Cancel'],
+      recommendation: 'Fetch when allowed.',
+      estimatedTimeCost: 'One request.',
+    },
+  });
+  repository.resolveCheckpoint({
+    id: pending.id,
+    decision: 'approved',
+    rationale: 'User approved.',
+    metadata: { executionState: 'pending-execution' },
+  });
+  const cancelled = repository.resolveCheckpoint({
+    id: pending.id,
+    decision: 'cancelled',
+    rationale: 'User cancelled on recovery.',
+    metadata: { executionState: 'cancelled' },
+  });
+  assert.equal(cancelled.metadata.executionState, 'cancelled');
+  assert.equal(repository.listPendingCheckpoints().length, 0);
+});

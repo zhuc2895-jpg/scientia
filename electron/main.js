@@ -467,6 +467,7 @@ async function authorizeExternalSourceFetch(actionLabel, { action, payload } = {
       id: pendingCheckpoint.id,
       decision,
       rationale: `User cancelled external source retrieval for ${actionLabel}.`,
+      metadata: { executionState: 'cancelled' },
     });
     throw new Error('User cancelled external source retrieval.');
   }
@@ -571,7 +572,12 @@ async function resolveProjectSourceCheckpoint({ id, decision, rationale } = {}) 
   if (!checkpoint) throw new Error('无法处理不存在的 Checkpoint。');
   if (checkpoint.type === 'external-source-fetch') {
     if (decision !== 'approved') {
-      productRepository.resolveCheckpoint({ id, decision, rationale });
+      productRepository.resolveCheckpoint({
+        id,
+        decision,
+        rationale,
+        metadata: { executionState: 'cancelled' },
+      });
       return productRepository.loadState();
     }
     const state = productRepository.loadState();
