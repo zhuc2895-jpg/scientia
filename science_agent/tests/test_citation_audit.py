@@ -39,6 +39,20 @@ def verified_evidence(locator: str, **overrides):
     return entry
 
 
+def verified_pair(claim: str, locator: str = ".science/sources/paper.md", *, source_id=None, citation_number=None):
+    source = verified_source(
+        locator,
+        **({"id": source_id} if source_id is not None else {}),
+        metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": claim, "contentHash": "a" * 64}},
+    )
+    evidence = verified_evidence(
+        locator,
+        **({"citationNumber": citation_number} if citation_number is not None else {}),
+        claim=claim,
+    )
+    return source, evidence
+
+
 class CitationAuditTests(unittest.TestCase):
     def test_number_ranges_expand_every_reference(self) -> None:
         source = {"localLocator": ".science/sources/paper.md", "title": "Paper"}
@@ -418,6 +432,21 @@ class CitationAuditTests(unittest.TestCase):
         )
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
+    def test_but_separates_two_cited_clauses(self) -> None:
+        first, first_evidence = verified_pair(
+            "First result is supported", ".science/sources/first.md", source_id="first", citation_number=1
+        )
+        second, second_evidence = verified_pair(
+            "Second result is rejected", ".science/sources/second.md", source_id="second", citation_number=2
+        )
+        result = audit_citations(
+            text="First result is supported [1] but second result is rejected [2]. Limitation: x.",
+            active_sources=[first, second],
+            registered_sources=[first, second],
+            evidence_entries=[first_evidence, second_evidence],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
+
     def test_et_al_abbreviation_does_not_end_the_claim_sentence(self) -> None:
         source = verified_source(
             ".science/sources/paper.md",
@@ -530,15 +559,7 @@ class CitationAuditTests(unittest.TestCase):
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
     def test_plain_conjunction_before_uncited_lead_binds_the_cited_clause(self) -> None:
-        source = verified_source(
-            ".science/sources/paper.md",
-            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Beta was confirmed", "contentHash": "a" * 64}},
-        )
-        evidence = verified_evidence(
-            ".science/sources/paper.md",
-            citationNumber=1,
-            claim="Beta was confirmed",
-        )
+        source, evidence = verified_pair("Beta was confirmed", citation_number=1)
         result = audit_citations(
             text="Alpha was observed and beta was confirmed [1]. Limitation: x.",
             active_sources=[source],
@@ -548,17 +569,19 @@ class CitationAuditTests(unittest.TestCase):
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
     def test_plain_conjunction_accepts_a_lexical_finite_predicate(self) -> None:
-        source = verified_source(
-            ".science/sources/paper.md",
-            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Beta was confirmed", "contentHash": "a" * 64}},
-        )
-        evidence = verified_evidence(
-            ".science/sources/paper.md",
-            citationNumber=1,
-            claim="Beta was confirmed",
-        )
+        source, evidence = verified_pair("Beta was confirmed", citation_number=1)
         result = audit_citations(
             text="Alpha reported and beta was confirmed [1]. Limitation: x.",
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[evidence],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
+
+    def test_plain_conjunction_accepts_a_present_tense_lexical_predicate(self) -> None:
+        source, evidence = verified_pair("Beta was confirmed", citation_number=1)
+        result = audit_citations(
+            text="Alpha reports and beta was confirmed [1]. Limitation: x.",
             active_sources=[source],
             registered_sources=[source],
             evidence_entries=[evidence],
@@ -570,17 +593,10 @@ class CitationAuditTests(unittest.TestCase):
             "The report, and appendix support the result",
             "The report and appendix support the result",
             "The finding and appendix support the result",
+            "The reports and appendix support the result",
         ):
             with self.subTest(claim=claim):
-                source = verified_source(
-                    ".science/sources/paper.md",
-                    metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": claim, "contentHash": "a" * 64}},
-                )
-                evidence = verified_evidence(
-                    ".science/sources/paper.md",
-                    citationNumber=1,
-                    claim=claim,
-                )
+                source, evidence = verified_pair(claim, citation_number=1)
                 result = audit_citations(
                     text=f"{claim} [1]. Limitation: x.",
                     active_sources=[source],
@@ -591,15 +607,7 @@ class CitationAuditTests(unittest.TestCase):
 
     def test_internal_and_after_an_earlier_predicate_does_not_split_the_noun_phrase(self) -> None:
         claim = "The report, and appendix support the result"
-        source = verified_source(
-            ".science/sources/paper.md",
-            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": claim, "contentHash": "a" * 64}},
-        )
-        evidence = verified_evidence(
-            ".science/sources/paper.md",
-            citationNumber=1,
-            claim=claim,
-        )
+        source, evidence = verified_pair(claim, citation_number=1)
         result = audit_citations(
             text=f"Alpha was observed, and {claim} [1]. Limitation: x.",
             active_sources=[source],

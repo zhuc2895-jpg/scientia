@@ -23,6 +23,15 @@ LATEX_RE = re.compile(
     r"\\(?:cite|citep|citet|parencite|textcite)\*?\s*(?:\[[^\]]*\]\s*)*\{([^}]+)\}",
     flags=re.IGNORECASE,
 )
+_COORDINATION_WORD_PATTERN = r"(?:and|but|while)"
+_COORDINATION_TOKEN_RE = re.compile(rf"\s+{_COORDINATION_WORD_PATTERN}\s+", flags=re.IGNORECASE)
+_COORDINATION_CANDIDATE_RE = re.compile(
+    rf"(?:,\s*|\s+){_COORDINATION_WORD_PATTERN}\s+", flags=re.IGNORECASE
+)
+_COORDINATION_AFTER_CITATION_RE = re.compile(
+    rf"\s*(?:,\s*(?:(?:{_COORDINATION_WORD_PATTERN})\s*)?|(?:{_COORDINATION_WORD_PATTERN})\s+)",
+    flags=re.IGNORECASE,
+)
 
 
 def _normalized_title(value: Any) -> str:
@@ -172,13 +181,32 @@ def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, in
         if char == "," and _has_citation_after(text, index + 1):
             right = index
             break
-        if text[index:index + 5].lower() == " and " and _has_citation_after(text, index + 5):
-            right = index
-            break
-        if text[index:index + 7].lower() == " while " and _has_citation_after(text, index + 7):
+        coordination = _COORDINATION_TOKEN_RE.match(text, index)
+        if coordination and _has_citation_after(text, coordination.end()):
             right = index
             break
     return left, right
+
+
+_FINITE_PREDICATE_RE = re.compile(
+    r"\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|must|shall|should|will|would|[a-z]+ed)\b",
+    flags=re.IGNORECASE,
+)
+_PRESENT_PREDICATE_RE = re.compile(
+    r"\b(?:reports?|shows?|finds?|suggests?|indicates?|confirms?|supports?|observes?|demonstrates?|argues?|notes?|states?|concludes?|reveals?)\b",
+    flags=re.IGNORECASE,
+)
+_DETERMINERS = frozenset({"a", "an", "the", "this", "that", "these", "those"})
+
+
+def _has_finite_predicate(value: str) -> bool:
+    if _FINITE_PREDICATE_RE.search(value):
+        return True
+    for match in _PRESENT_PREDICATE_RE.finditer(value):
+        previous = re.search(r"([A-Za-z][A-Za-z'’-]*)\s*$", value[:match.start()])
+        if previous and previous.group(1).lower() not in _DETERMINERS:
+            return True
+    return False
 
 
 def _local_coordination_boundary(text: str, start: int, sentence_start: int) -> int | None:
@@ -187,23 +215,14 @@ def _local_coordination_boundary(text: str, start: int, sentence_start: int) -> 
         previous_citation = match
     if previous_citation is not None:
         segment = text[previous_citation.end():start]
-        coordination = re.search(
-            r"\s*(?:,\s*(?:(?:and|but|while)\s*)?|(?:and|but|while)\s+)",
-            segment,
-            flags=re.IGNORECASE,
-        )
+        coordination = _COORDINATION_AFTER_CITATION_RE.search(segment)
         return previous_citation.end() + coordination.end() if coordination else None
     segment = text[sentence_start:start]
-    candidates = list(re.finditer(r"(?:,\s*|\s+)(?:and|but|while)\s+", segment, flags=re.IGNORECASE))
+    candidates = list(_COORDINATION_CANDIDATE_RE.finditer(segment))
     for candidate in candidates:
         # ponytail: lexical clause heuristic; use a parser only if broader English coverage matters.
         preceding = segment[:candidate.start()]
-        has_predicate = re.search(
-            r"\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|must|shall|should|will|would|[a-z]+ed)\b",
-            preceding,
-            flags=re.IGNORECASE,
-        ) is not None
-        if has_predicate:
+        if _has_finite_predicate(preceding):
             return sentence_start + candidate.end()
     return None
 
