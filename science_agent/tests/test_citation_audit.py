@@ -54,6 +54,25 @@ def verified_pair(claim: str, locator: str = ".science/sources/paper.md", *, sou
 
 
 class CitationAuditTests(unittest.TestCase):
+    def assert_single_claim_contract(self, text: str, full_claim: str, narrow_claim: str) -> None:
+        narrow_source, narrow_evidence = verified_pair(narrow_claim, citation_number=1)
+        narrow_result = audit_citations(
+            text=text,
+            active_sources=[narrow_source],
+            registered_sources=[narrow_source],
+            evidence_entries=[narrow_evidence],
+        )
+        self.assertEqual(narrow_result["outOfBoundaryCitations"], ["[1]"])
+
+        full_source, full_evidence = verified_pair(full_claim, citation_number=1)
+        full_result = audit_citations(
+            text=text,
+            active_sources=[full_source],
+            registered_sources=[full_source],
+            evidence_entries=[full_evidence],
+        )
+        self.assertEqual(full_result["outOfBoundaryCitations"], [])
+
     def test_number_ranges_expand_every_reference(self) -> None:
         source = {"localLocator": ".science/sources/paper.md", "title": "Paper"}
         result = audit_citations(
@@ -560,25 +579,33 @@ class CitationAuditTests(unittest.TestCase):
         )
         for text, full_claim, narrow_claim in cases:
             with self.subTest(text=text):
-                narrow_source, narrow_evidence = verified_pair(narrow_claim, citation_number=1)
-                narrow_result = audit_citations(
-                    text=text,
-                    active_sources=[narrow_source],
-                    registered_sources=[narrow_source],
-                    evidence_entries=[narrow_evidence],
-                )
-                self.assertEqual(narrow_result["outOfBoundaryCitations"], ["[1]"])
+                self.assert_single_claim_contract(text, full_claim, narrow_claim)
 
-                full_source, full_evidence = verified_pair(full_claim, citation_number=1)
-                full_result = audit_citations(
-                    text=text,
-                    active_sources=[full_source],
-                    registered_sources=[full_source],
-                    evidence_entries=[full_evidence],
-                )
-                self.assertEqual(full_result["outOfBoundaryCitations"], [])
+    def test_internal_periods_do_not_narrow_a_sentence_claim(self) -> None:
+        cases = (
+            (
+                "The rate increased by 0.5 [1].",
+                "The rate increased by 0.5",
+                "5",
+            ),
+            (
+                "J. Smith reported the result [1].",
+                "J. Smith reported the result",
+                "Smith reported the result",
+            ),
+        )
+        for text, full_claim, narrow_claim in cases:
+            with self.subTest(text=text):
+                self.assert_single_claim_contract(text, full_claim, narrow_claim)
 
-    def test_coordination_search_stops_at_hard_sentence_boundaries(self) -> None:
+    def test_sentence_initial_coordination_is_part_of_the_claim(self) -> None:
+        self.assert_single_claim_contract(
+            "But beta was rejected [1].",
+            "But beta was rejected",
+            "beta was rejected",
+        )
+
+    def test_hard_sentence_boundaries_keep_citation_claims_independent(self) -> None:
         first = verified_source(
             ".science/sources/first.md",
             id="first",
@@ -601,7 +628,7 @@ class CitationAuditTests(unittest.TestCase):
         )
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
-    def test_period_semicolon_and_newline_stop_coordination_search(self) -> None:
+    def test_period_semicolon_and_newline_boundaries_keep_claims_independent(self) -> None:
         first = verified_source(
             ".science/sources/first.md",
             id="first",

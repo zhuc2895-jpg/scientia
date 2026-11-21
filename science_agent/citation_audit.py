@@ -146,17 +146,39 @@ def _is_abbreviation_period(text: str, index: int) -> bool:
     return any(prefix.endswith(abbreviation) for abbreviation in ("et al.", "e.g.", "i.e.", "dr.", "mr.", "ms.", "prof.", "vs."))
 
 
+def _is_internal_period(text: str, index: int) -> bool:
+    before = text[index - 1] if index > 0 else ""
+    after = text[index + 1] if index + 1 < len(text) else ""
+    if before.isalnum() and after.isalnum():
+        return True
+    if before.isupper():
+        token_start = index - 1
+        if token_start == 0 or not text[token_start - 1].isalnum():
+            following = re.search(r"\S", text[index + 1:])
+            return bool(following and following.group(0).isupper())
+    return False
+
+
+def _is_sentence_boundary(text: str, index: int) -> bool:
+    char = text[index]
+    if char in ";\n":
+        return True
+    if char not in ".!?":
+        return False
+    if char != ".":
+        return True
+    return not _is_abbreviation_period(text, index) and not _is_internal_period(text, index)
+
+
 def _sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     left = 0
     for index in range(start - 1, -1, -1):
-        char = text[index]
-        if char in ";\n" or (char in ".!?" and not (char == "." and _is_abbreviation_period(text, index))):
+        if _is_sentence_boundary(text, index):
             left = index + 1
             break
     right = len(text)
     for index in range(end, len(text)):
-        char = text[index]
-        if char in ";\n" or (char in ".!?" and not (char == "." and _is_abbreviation_period(text, index))):
+        if _is_sentence_boundary(text, index):
             right = index
             break
     return left, right
@@ -170,7 +192,6 @@ def _citation_claim_text(text: str, start: int, end: int) -> str:
     before = text[left_break:start]
     after = text[end:right_break] if end < right_break else ""
     sentence = CITATION_RE.sub(" ", f"{before} {after}")
-    sentence = re.sub(r"^\s*(?:and|but|while)\b\s*", "", sentence, flags=re.IGNORECASE)
     sentence = re.sub(r"[()\[\]]+", " ", sentence)
     return _normalize_claim(sentence)
 
