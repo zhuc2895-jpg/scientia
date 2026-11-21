@@ -23,17 +23,6 @@ LATEX_RE = re.compile(
     r"\\(?:cite|citep|citet|parencite|textcite)\*?\s*(?:\[[^\]]*\]\s*)*\{([^}]+)\}",
     flags=re.IGNORECASE,
 )
-_COORDINATION_WORD_PATTERN = r"(?:and|but|while)"
-_COORDINATION_TOKEN_RE = re.compile(rf"\s+{_COORDINATION_WORD_PATTERN}\s+", flags=re.IGNORECASE)
-_COORDINATION_CANDIDATE_RE = re.compile(
-    rf"(?:,\s*|\s+){_COORDINATION_WORD_PATTERN}\s+", flags=re.IGNORECASE
-)
-_COORDINATION_AFTER_CITATION_RE = re.compile(
-    rf"\s*(?:,\s*(?:(?:{_COORDINATION_WORD_PATTERN})\s*)?|(?:{_COORDINATION_WORD_PATTERN})\s+)",
-    flags=re.IGNORECASE,
-)
-
-
 def _normalized_title(value: Any) -> str:
     return re.sub(r"[^\w]+", " ", str(value or "").lower()).strip()
 
@@ -157,15 +146,7 @@ def _is_abbreviation_period(text: str, index: int) -> bool:
     return any(prefix.endswith(abbreviation) for abbreviation in ("et al.", "e.g.", "i.e.", "dr.", "mr.", "ms.", "prof.", "vs."))
 
 
-def _has_citation_before(text: str, index: int) -> bool:
-    return CITATION_RE.search(text, 0, index) is not None
-
-
-def _has_citation_after(text: str, index: int) -> bool:
-    return CITATION_RE.search(text, index) is not None
-
-
-def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, int]:
+def _sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     left = 0
     for index in range(start - 1, -1, -1):
         char = text[index]
@@ -178,63 +159,14 @@ def _sentence_or_clause_bounds(text: str, start: int, end: int) -> tuple[int, in
         if char in ";\n" or (char in ".!?" and not (char == "." and _is_abbreviation_period(text, index))):
             right = index
             break
-        if char == "," and _has_citation_after(text, index + 1):
-            right = index
-            break
-        coordination = _COORDINATION_TOKEN_RE.match(text, index)
-        if coordination and _has_citation_after(text, coordination.end()):
-            right = index
-            break
     return left, right
-
-
-_FINITE_PREDICATE_RE = re.compile(
-    r"\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|must|shall|should|will|would|[a-z]+ed)\b",
-    flags=re.IGNORECASE,
-)
-_PRESENT_PREDICATE_RE = re.compile(
-    r"\b(?:reports?|shows?|finds?|suggests?|indicates?|confirms?|supports?|observes?|demonstrates?|argues?|notes?|states?|concludes?|reveals?)\b",
-    flags=re.IGNORECASE,
-)
-_DETERMINERS = frozenset({"a", "an", "the", "this", "that", "these", "those"})
-
-
-def _has_finite_predicate(value: str) -> bool:
-    if _FINITE_PREDICATE_RE.search(value):
-        return True
-    for match in _PRESENT_PREDICATE_RE.finditer(value):
-        previous = re.search(r"([A-Za-z][A-Za-z'’-]*)\s*$", value[:match.start()])
-        if previous and previous.group(1).lower() not in _DETERMINERS:
-            return True
-    return False
-
-
-def _local_coordination_boundary(text: str, start: int, sentence_start: int) -> int | None:
-    previous_citation = None
-    for match in CITATION_RE.finditer(text, sentence_start, start):
-        previous_citation = match
-    if previous_citation is not None:
-        segment = text[previous_citation.end():start]
-        coordination = _COORDINATION_AFTER_CITATION_RE.search(segment)
-        return previous_citation.end() + coordination.end() if coordination else None
-    segment = text[sentence_start:start]
-    candidates = list(_COORDINATION_CANDIDATE_RE.finditer(segment))
-    for candidate in candidates:
-        # ponytail: lexical clause heuristic; use a parser only if broader English coverage matters.
-        preceding = segment[:candidate.start()]
-        if _has_finite_predicate(preceding):
-            return sentence_start + candidate.end()
-    return None
 
 
 def _citation_claim_text(text: str, start: int, end: int) -> str:
     boundary_end = end
     while boundary_end > start and text[boundary_end - 1] in ".,;:)":
         boundary_end -= 1
-    left_break, right_break = _sentence_or_clause_bounds(text, start, boundary_end)
-    coordination_left = _local_coordination_boundary(text, start, left_break)
-    if coordination_left is not None and coordination_left < start:
-        left_break = coordination_left
+    left_break, right_break = _sentence_bounds(text, start, boundary_end)
     before = text[left_break:start]
     after = text[end:right_break] if end < right_break else ""
     sentence = CITATION_RE.sub(" ", f"{before} {after}")

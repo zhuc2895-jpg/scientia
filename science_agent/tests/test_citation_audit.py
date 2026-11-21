@@ -432,21 +432,6 @@ class CitationAuditTests(unittest.TestCase):
         )
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
-    def test_but_separates_two_cited_clauses(self) -> None:
-        first, first_evidence = verified_pair(
-            "First result is supported", ".science/sources/first.md", source_id="first", citation_number=1
-        )
-        second, second_evidence = verified_pair(
-            "Second result is rejected", ".science/sources/second.md", source_id="second", citation_number=2
-        )
-        result = audit_citations(
-            text="First result is supported [1] but second result is rejected [2]. Limitation: x.",
-            active_sources=[first, second],
-            registered_sources=[first, second],
-            evidence_entries=[first_evidence, second_evidence],
-        )
-        self.assertEqual(result["outOfBoundaryCitations"], [])
-
     def test_et_al_abbreviation_does_not_end_the_claim_sentence(self) -> None:
         source = verified_source(
             ".science/sources/paper.md",
@@ -479,42 +464,47 @@ class CitationAuditTests(unittest.TestCase):
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
 
-    def test_comma_and_while_coordination_binds_each_citation_clause(self) -> None:
-        first = verified_source(
-            ".science/sources/first.md",
-            id="first",
-            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "First result is supported", "contentHash": "a" * 64}},
-        )
-        first_evidence = verified_evidence(
-            ".science/sources/first.md",
-            citationNumber=1,
-            claim="First result is supported",
-        )
+    def test_ambiguous_multi_citation_coordination_uses_the_whole_sentence(self) -> None:
         cases = (
-            ("First result is supported [1], and second result is rejected [2].", "Second result is rejected"),
-            ("First result is supported [1], second result is rejected [2].", "Second result is rejected"),
-            ("First result is supported [1] while second result is rejected [2].", "Second result is rejected"),
-            ("First result is supported [1] and second result is rejected [2].", "Second result is rejected"),
-            ("First result is supported [1], and second result, however, is rejected [2].", "Second result, however, is rejected"),
+            ("First result is supported [1] and second result is rejected [2].", "First result is supported and second result is rejected"),
+            ("First result is supported [1] but second result is rejected [2].", "First result is supported but second result is rejected"),
+            ("First result is supported [1] while second result is rejected [2].", "First result is supported while second result is rejected"),
         )
-        for text, second_claim in cases:
+        for text, claim in cases:
             with self.subTest(text=text):
-                selected_second = verified_source(
-                    ".science/sources/second.md",
-                    id="second",
-                    metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": second_claim, "contentHash": "a" * 64}},
+                first, first_evidence = verified_pair(
+                    claim, ".science/sources/first.md", source_id="first", citation_number=1
                 )
-                selected_evidence = [
-                    first_evidence,
-                    verified_evidence(".science/sources/second.md", citationNumber=2, claim=second_claim),
-                ]
+                second, second_evidence = verified_pair(
+                    claim, ".science/sources/second.md", source_id="second", citation_number=2
+                )
                 result = audit_citations(
-                    text=f"{text} Limitation: x.",
-                    active_sources=[first, selected_second],
-                    registered_sources=[first, selected_second],
-                    evidence_entries=selected_evidence,
+                    text=text,
+                    active_sources=[first, second],
+                    registered_sources=[first, second],
+                    evidence_entries=[first_evidence, second_evidence],
                 )
                 self.assertEqual(result["outOfBoundaryCitations"], [])
+
+                narrow_first, narrow_first_evidence = verified_pair(
+                    "First result is supported",
+                    ".science/sources/first.md",
+                    source_id="first",
+                    citation_number=1,
+                )
+                narrow_second, narrow_second_evidence = verified_pair(
+                    "Second result is rejected",
+                    ".science/sources/second.md",
+                    source_id="second",
+                    citation_number=2,
+                )
+                narrow_result = audit_citations(
+                    text=text,
+                    active_sources=[narrow_first, narrow_second],
+                    registered_sources=[narrow_first, narrow_second],
+                    evidence_entries=[narrow_first_evidence, narrow_second_evidence],
+                )
+                self.assertEqual(narrow_result["outOfBoundaryCitations"], ["[1]", "[2]"])
 
 
     def test_claim_normalization_preserves_meaning_changing_punctuation(self) -> None:
@@ -535,86 +525,58 @@ class CitationAuditTests(unittest.TestCase):
         )
         self.assertEqual(result["outOfBoundaryCitations"], ["[1]"])
 
-    def test_uncited_lead_clause_can_precede_the_cited_local_clause(self) -> None:
-        first = verified_source(
-            ".science/sources/first.md",
-            id="first",
-            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Beta was confirmed", "contentHash": "a" * 64}},
+    def test_ambiguous_coordination_requires_the_whole_sentence_claim(self) -> None:
+        cases = (
+            (
+                "Alpha was observed and beta was confirmed [1].",
+                "Alpha was observed and beta was confirmed",
+                "Beta was confirmed",
+            ),
+            (
+                "Alpha reported and beta was confirmed [1].",
+                "Alpha reported and beta was confirmed",
+                "Beta was confirmed",
+            ),
+            (
+                "Alpha reports and beta was confirmed [1].",
+                "Alpha reports and beta was confirmed",
+                "Beta was confirmed",
+            ),
+            (
+                "The report, and appendix support the result [1].",
+                "The report, and appendix support the result",
+                "appendix support the result",
+            ),
+            (
+                "Alpha was observed, and the report, and appendix support the result [1].",
+                "Alpha was observed, and the report, and appendix support the result",
+                "The report, and appendix support the result",
+            ),
+            (
+                "The red reports and appendix support the result [1].",
+                "The red reports and appendix support the result",
+                "appendix support the result",
+            ),
         )
-        second = verified_source(
-            ".science/sources/second.md",
-            id="second",
-            metadata={"verification": {"locator": "line:3", "quote": "Supported result.", "claim": "Gamma was rejected", "contentHash": "a" * 64}},
-        )
-        evidence = [
-            verified_evidence(".science/sources/first.md", citationNumber=1, claim="Beta was confirmed"),
-            verified_evidence(".science/sources/second.md", citationNumber=2, claim="Gamma was rejected"),
-        ]
-        result = audit_citations(
-            text="Alpha was observed, and beta was confirmed [1], while gamma was rejected [2]. Limitation: x.",
-            active_sources=[first, second],
-            registered_sources=[first, second],
-            evidence_entries=evidence,
-        )
-        self.assertEqual(result["outOfBoundaryCitations"], [])
-
-    def test_plain_conjunction_before_uncited_lead_binds_the_cited_clause(self) -> None:
-        source, evidence = verified_pair("Beta was confirmed", citation_number=1)
-        result = audit_citations(
-            text="Alpha was observed and beta was confirmed [1]. Limitation: x.",
-            active_sources=[source],
-            registered_sources=[source],
-            evidence_entries=[evidence],
-        )
-        self.assertEqual(result["outOfBoundaryCitations"], [])
-
-    def test_plain_conjunction_accepts_a_lexical_finite_predicate(self) -> None:
-        source, evidence = verified_pair("Beta was confirmed", citation_number=1)
-        result = audit_citations(
-            text="Alpha reported and beta was confirmed [1]. Limitation: x.",
-            active_sources=[source],
-            registered_sources=[source],
-            evidence_entries=[evidence],
-        )
-        self.assertEqual(result["outOfBoundaryCitations"], [])
-
-    def test_plain_conjunction_accepts_a_present_tense_lexical_predicate(self) -> None:
-        source, evidence = verified_pair("Beta was confirmed", citation_number=1)
-        result = audit_citations(
-            text="Alpha reports and beta was confirmed [1]. Limitation: x.",
-            active_sources=[source],
-            registered_sources=[source],
-            evidence_entries=[evidence],
-        )
-        self.assertEqual(result["outOfBoundaryCitations"], [])
-
-    def test_internal_and_does_not_split_a_coordinated_noun_phrase(self) -> None:
-        for claim in (
-            "The report, and appendix support the result",
-            "The report and appendix support the result",
-            "The finding and appendix support the result",
-            "The reports and appendix support the result",
-        ):
-            with self.subTest(claim=claim):
-                source, evidence = verified_pair(claim, citation_number=1)
-                result = audit_citations(
-                    text=f"{claim} [1]. Limitation: x.",
-                    active_sources=[source],
-                    registered_sources=[source],
-                    evidence_entries=[evidence],
+        for text, full_claim, narrow_claim in cases:
+            with self.subTest(text=text):
+                narrow_source, narrow_evidence = verified_pair(narrow_claim, citation_number=1)
+                narrow_result = audit_citations(
+                    text=text,
+                    active_sources=[narrow_source],
+                    registered_sources=[narrow_source],
+                    evidence_entries=[narrow_evidence],
                 )
-                self.assertEqual(result["outOfBoundaryCitations"], [])
+                self.assertEqual(narrow_result["outOfBoundaryCitations"], ["[1]"])
 
-    def test_internal_and_after_an_earlier_predicate_does_not_split_the_noun_phrase(self) -> None:
-        claim = "The report, and appendix support the result"
-        source, evidence = verified_pair(claim, citation_number=1)
-        result = audit_citations(
-            text=f"Alpha was observed, and {claim} [1]. Limitation: x.",
-            active_sources=[source],
-            registered_sources=[source],
-            evidence_entries=[evidence],
-        )
-        self.assertEqual(result["outOfBoundaryCitations"], [])
+                full_source, full_evidence = verified_pair(full_claim, citation_number=1)
+                full_result = audit_citations(
+                    text=text,
+                    active_sources=[full_source],
+                    registered_sources=[full_source],
+                    evidence_entries=[full_evidence],
+                )
+                self.assertEqual(full_result["outOfBoundaryCitations"], [])
 
     def test_coordination_search_stops_at_hard_sentence_boundaries(self) -> None:
         first = verified_source(
