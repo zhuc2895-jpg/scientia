@@ -146,20 +146,30 @@ def _is_abbreviation_period(text: str, index: int) -> bool:
     return any(prefix.endswith(abbreviation) for abbreviation in ("et al.", "e.g.", "i.e.", "dr.", "mr.", "ms.", "prof.", "vs."))
 
 
-def _is_internal_period(text: str, index: int) -> bool:
+def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
     before = text[index - 1] if index > 0 else ""
     after = text[index + 1] if index + 1 < len(text) else ""
-    if before.isalnum() and after.isalnum():
+    if before.isdigit() and after.isdigit():
         return True
-    if before.isupper():
-        token_start = index - 1
-        if token_start == 0 or not text[token_start - 1].isalnum():
-            following = re.search(r"\S", text[index + 1:])
-            return bool(following and following.group(0).isupper())
+    token_start = index
+    while token_start > 0 and not text[token_start - 1].isspace():
+        token_start -= 1
+    token_end = index + 1
+    while token_end < len(text) and not text[token_end].isspace():
+        token_end += 1
+    token = text[token_start:token_end]
+    if after and not after.isspace() and any(separator in token for separator in "/\\:@#"):
+        return True
+    if re.fullmatch(r"(?:[A-Za-z]\.){2,}", token):
+        return True
+    letter_start = index - 1
+    if before.isupper() and (letter_start == 0 or text[letter_start - 1] in "([{"):
+        following = re.search(r"\S", text[index + 1:])
+        return bool(following and following.group(0).isupper())
     return False
 
 
-def _is_sentence_boundary(text: str, index: int) -> bool:
+def _is_claim_boundary(text: str, index: int) -> bool:
     char = text[index]
     if char in ";\n":
         return True
@@ -167,18 +177,18 @@ def _is_sentence_boundary(text: str, index: int) -> bool:
         return False
     if char != ".":
         return True
-    return not _is_abbreviation_period(text, index) and not _is_internal_period(text, index)
+    return not _is_abbreviation_period(text, index) and not _period_belongs_to_token_or_initial(text, index)
 
 
 def _sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     left = 0
     for index in range(start - 1, -1, -1):
-        if _is_sentence_boundary(text, index):
+        if _is_claim_boundary(text, index):
             left = index + 1
             break
     right = len(text)
     for index in range(end, len(text)):
-        if _is_sentence_boundary(text, index):
+        if _is_claim_boundary(text, index):
             right = index
             break
     return left, right

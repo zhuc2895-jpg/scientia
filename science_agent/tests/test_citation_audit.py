@@ -598,6 +598,22 @@ class CitationAuditTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assert_single_claim_contract(text, full_claim, narrow_claim)
 
+    def test_non_initial_periods_keep_the_following_claim_independent(self) -> None:
+        cases = (
+            ("Result X. Beta was rejected [1].", "Beta was rejected"),
+            ("The result was supported.Next result was rejected [1].", "Next result was rejected"),
+        )
+        for text, claim in cases:
+            with self.subTest(text=text):
+                source, evidence = verified_pair(claim, citation_number=1)
+                result = audit_citations(
+                    text=text,
+                    active_sources=[source],
+                    registered_sources=[source],
+                    evidence_entries=[evidence],
+                )
+                self.assertEqual(result["outOfBoundaryCitations"], [])
+
     def test_sentence_initial_coordination_is_part_of_the_claim(self) -> None:
         self.assert_single_claim_contract(
             "But beta was rejected [1].",
