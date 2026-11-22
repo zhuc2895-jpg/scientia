@@ -74,6 +74,10 @@ class CitationAuditTests(unittest.TestCase):
         result = self._audit_text_with_claim(text, claim)
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
+    def assert_claim_rejected(self, text: str, claim: str) -> None:
+        result = self._audit_text_with_claim(text, claim)
+        self.assertEqual(result["outOfBoundaryCitations"], ["[1]"])
+
     def test_number_ranges_expand_every_reference(self) -> None:
         source = {"localLocator": ".science/sources/paper.md", "title": "Paper"}
         result = audit_citations(
@@ -712,6 +716,10 @@ class CitationAuditTests(unittest.TestCase):
         self.assert_claim_authorized(
             "We measured X. Beta was rejected [1].",
             "Beta was rejected",
+        )
+        self.assert_claim_rejected(
+            "We measured X. Beta was rejected [1].",
+            "We measured X. Beta was rejected",
         )
 
     def test_variable_x_after_a_label_is_a_sentence_boundary(self) -> None:
