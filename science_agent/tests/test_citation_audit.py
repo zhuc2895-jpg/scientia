@@ -603,6 +603,16 @@ class CitationAuditTests(unittest.TestCase):
                 "J. Smith reported the result",
                 "Smith reported the result",
             ),
+            (
+                "The model by J. Smith was rejected [1].",
+                "The model by J. Smith was rejected",
+                "Smith was rejected",
+            ),
+            (
+                "The U.S. report is supported [1].",
+                "The U.S. report is supported",
+                "report is supported",
+            ),
         )
         for text, full_claim, narrow_claim in cases:
             with self.subTest(text=text):
@@ -612,6 +622,7 @@ class CitationAuditTests(unittest.TestCase):
         cases = (
             ("Result X. Beta was rejected [1].", "Beta was rejected"),
             ("The result was supported.Next result was rejected [1].", "Next result was rejected"),
+            ("The result was supported.next result was rejected [1].", "next result was rejected"),
         )
         for text, claim in cases:
             with self.subTest(text=text):
@@ -628,6 +639,21 @@ class CitationAuditTests(unittest.TestCase):
                 "See example.com for details [1].",
                 "See example.com for details",
                 "com for details",
+            ),
+            (
+                "The result in manuscript.MD is supported [1].",
+                "The result in manuscript.MD is supported",
+                "MD is supported",
+            ),
+            (
+                "See Example.COM for details [1].",
+                "See Example.COM for details",
+                "COM for details",
+            ),
+            (
+                r"See data\\report.md for details [1].",
+                r"See data\\report.md for details",
+                r"report.md for details",
             ),
         )
         for text, full_claim, narrow_claim in cases:

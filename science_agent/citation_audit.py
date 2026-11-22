@@ -146,10 +146,22 @@ def _is_abbreviation_period(text: str, index: int) -> bool:
     return any(prefix.endswith(abbreviation) for abbreviation in ("et al.", "e.g.", "i.e.", "dr.", "mr.", "ms.", "prof.", "vs."))
 
 
+_TECHNICAL_SUFFIXES = frozenset({
+    "ai", "app", "bib", "ca", "cn", "co", "com", "csv", "de", "dev", "docx", "edu",
+    "eu", "fr", "gov", "htm", "html", "info", "io", "ipynb", "jp", "jpeg", "jpg",
+    "json", "md", "net", "org", "pdf", "png", "py", "ris", "svg", "tex", "txt", "uk",
+    "us", "xml", "yaml", "yml", "zip",
+})
+_VARIABLE_CONTEXT_WORDS = frozenset({
+    "appendix", "case", "equation", "figure", "item", "part", "phase", "point",
+    "result", "section", "step", "table", "value", "variable", "version",
+})
+
+
 def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
-    before = text[index - 1] if index > 0 else ""
-    after = text[index + 1] if index + 1 < len(text) else ""
-    if before.isdigit() and after.isdigit():
+    char_before = text[index - 1] if index > 0 else ""
+    char_after = text[index + 1] if index + 1 < len(text) else ""
+    if char_before.isdigit() and char_after.isdigit():
         return True
     token_start = index
     while token_start > 0 and not text[token_start - 1].isspace():
@@ -160,13 +172,19 @@ def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
     token = text[token_start:token_end]
     if re.fullmatch(r"(?:[A-Za-z]\.){2,}", token):
         return True
-    if before.isalnum() and after.isalnum():
-        token_before = text[token_start:index]
-        if any(separator in token_before for separator in "/\\:@"):
+    if char_before.isalnum() and char_after.isalnum():
+        token_prefix = text[token_start:index]
+        if any(separator in token_prefix for separator in "/\\:@"):
             return True
-        return not after.isupper()
+        suffix_end = index + 1
+        while suffix_end < len(text) and text[suffix_end].isalnum():
+            suffix_end += 1
+        return text[index + 1:suffix_end].lower() in _TECHNICAL_SUFFIXES
     letter_start = index - 1
-    if before.isupper() and (letter_start == 0 or text[letter_start - 1] in "([{"):
+    if char_before.isupper() and (letter_start == 0 or not text[letter_start - 1].isalnum()):
+        preceding_word = re.search(r"([A-Za-z][A-Za-z'’-]*)\s+$", text[:letter_start])
+        if preceding_word and preceding_word.group(1).lower() in _VARIABLE_CONTEXT_WORDS:
+            return False
         following = re.search(r"\S", text[index + 1:])
         return bool(following and following.group(0).isupper())
     return False
