@@ -146,16 +146,24 @@ def _is_abbreviation_period(text: str, index: int) -> bool:
     return any(prefix.endswith(abbreviation) for abbreviation in ("et al.", "e.g.", "i.e.", "dr.", "mr.", "ms.", "prof.", "vs."))
 
 
-# Case-insensitive suffixes for supported Source formats and common domain names.
-_TECHNICAL_TOKEN_SUFFIXES = frozenset({
-    "ai", "app", "bib", "ca", "cn", "co", "com", "csv", "de", "dev", "docx", "edu",
-    "eu", "fr", "go", "gov", "htm", "html", "info", "io", "ipynb", "jp", "jpeg",
-    "jpg", "json", "md", "net", "org", "pdf", "png", "py", "ris", "rst", "svg",
-    "tex", "txt", "uk", "us", "xml", "xyz", "yaml", "yml", "zip",
+_FILE_SUFFIXES = frozenset({
+    "bib", "csv", "docx", "go", "htm", "html", "ipynb", "jpeg", "jpg", "json",
+    "md", "pdf", "png", "py", "ris", "rst", "svg", "tex", "txt", "xml", "yaml",
+    "yml", "zip",
 })
+_DOMAIN_SUFFIXES = frozenset({
+    "ai", "app", "ca", "cn", "co", "com", "de", "dev", "edu", "eu", "fr", "gov",
+    "info", "io", "jp", "net", "org", "uk", "us", "xyz",
+})
+_TECHNICAL_TOKEN_SUFFIXES = _FILE_SUFFIXES | _DOMAIN_SUFFIXES
 _INITIAL_CONTEXT_WORDS = frozenset({
     "and", "by", "from", "of", "or", "variable", "with",
 })
+_LABEL_CONTEXT_WORDS = frozenset({
+    "appendix", "case", "equation", "figure", "item", "part", "phase", "point",
+    "result", "section", "step", "table", "value", "version",
+})
+_MATH_VARIABLE_LETTERS = frozenset("CFKMNPQRSTXYZ")
 
 
 def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
@@ -183,11 +191,20 @@ def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
     letter_start = index - 1
     if char_before.isupper() and (letter_start == 0 or not text[letter_start - 1].isalnum()):
         preceding_word = re.search(r"([A-Za-z][A-Za-z'’-]*)\s+$", text[:letter_start])
-        if letter_start == 0 or text[letter_start - 1] in "([{" or (
-            preceding_word and preceding_word.group(1).lower() in _INITIAL_CONTEXT_WORDS
-        ):
-            following = re.search(r"\S", text[index + 1:])
-            return bool(following and following.group(0).isupper())
+        following = re.search(r"\S", text[index + 1:])
+        if not following or not following.group(0).isupper():
+            return False
+        if letter_start == 0 or text[letter_start - 1] in "([{":
+            return True
+        if preceding_word:
+            word = preceding_word.group(1)
+            if word.lower() == "variable" and char_before in _MATH_VARIABLE_LETTERS:
+                return False
+            if word.lower() in _INITIAL_CONTEXT_WORDS:
+                return True
+            if word[0].isupper() and word.lower() not in _LABEL_CONTEXT_WORDS:
+                return True
+        return bool(re.search(r"(?:^|[\s([{])([A-Z])\.$", text[:letter_start].rstrip()))
     return False
 
 

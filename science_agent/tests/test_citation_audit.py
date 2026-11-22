@@ -600,6 +600,41 @@ class CitationAuditTests(unittest.TestCase):
                 "Smith was rejected",
             ),
             (
+                "The model from J. Smith was rejected [1].",
+                "The model from J. Smith was rejected",
+                "Smith was rejected",
+            ),
+            (
+                "The work of J. Smith was rejected [1].",
+                "The work of J. Smith was rejected",
+                "Smith was rejected",
+            ),
+            (
+                "The model with J. Smith was rejected [1].",
+                "The model with J. Smith was rejected",
+                "Smith was rejected",
+            ),
+            (
+                "The model and J. Smith were rejected [1].",
+                "The model and J. Smith were rejected",
+                "Smith were rejected",
+            ),
+            (
+                "The model or J. Smith was rejected [1].",
+                "The model or J. Smith was rejected",
+                "Smith was rejected",
+            ),
+            (
+                "John J. Smith was rejected [1].",
+                "John J. Smith was rejected",
+                "Smith was rejected",
+            ),
+            (
+                "J. R. Smith reported the result [1].",
+                "J. R. Smith reported the result",
+                "Smith reported the result",
+            ),
+            (
                 "The U.S. report is supported [1].",
                 "The U.S. report is supported",
                 "report is supported",
@@ -673,9 +708,15 @@ class CitationAuditTests(unittest.TestCase):
             "next: result was rejected",
         )
 
-    def test_capital_variable_after_a_verb_is_a_sentence_boundary(self) -> None:
+    def test_single_capital_after_non_context_word_is_a_sentence_boundary(self) -> None:
         self.assert_claim_authorized(
             "We measured X. Beta was rejected [1].",
+            "Beta was rejected",
+        )
+
+    def test_variable_x_after_a_label_is_a_sentence_boundary(self) -> None:
+        self.assert_claim_authorized(
+            "The variable X. Beta was rejected [1].",
             "Beta was rejected",
         )
 
