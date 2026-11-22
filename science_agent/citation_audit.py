@@ -158,10 +158,13 @@ def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
     while token_end < len(text) and not text[token_end].isspace():
         token_end += 1
     token = text[token_start:token_end]
-    if after and not after.isspace() and any(separator in token for separator in "/\\:@#"):
-        return True
     if re.fullmatch(r"(?:[A-Za-z]\.){2,}", token):
         return True
+    if before.isalnum() and after.isalnum():
+        token_before = text[token_start:index]
+        if any(separator in token_before for separator in "/\\:@"):
+            return True
+        return not after.isupper()
     letter_start = index - 1
     if before.isupper() and (letter_start == 0 or text[letter_start - 1] in "([{"):
         following = re.search(r"\S", text[index + 1:])
@@ -180,7 +183,7 @@ def _is_claim_boundary(text: str, index: int) -> bool:
     return not _is_abbreviation_period(text, index) and not _period_belongs_to_token_or_initial(text, index)
 
 
-def _sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
+def _claim_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     left = 0
     for index in range(start - 1, -1, -1):
         if _is_claim_boundary(text, index):
@@ -198,7 +201,7 @@ def _citation_claim_text(text: str, start: int, end: int) -> str:
     boundary_end = end
     while boundary_end > start and text[boundary_end - 1] in ".,;:)":
         boundary_end -= 1
-    left_break, right_break = _sentence_bounds(text, start, boundary_end)
+    left_break, right_break = _claim_bounds(text, start, boundary_end)
     before = text[left_break:start]
     after = text[end:right_break] if end < right_break else ""
     sentence = CITATION_RE.sub(" ", f"{before} {after}")

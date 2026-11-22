@@ -73,6 +73,16 @@ class CitationAuditTests(unittest.TestCase):
         )
         self.assertEqual(full_result["outOfBoundaryCitations"], [])
 
+    def assert_claim_authorized(self, text: str, claim: str) -> None:
+        source, evidence = verified_pair(claim, citation_number=1)
+        result = audit_citations(
+            text=text,
+            active_sources=[source],
+            registered_sources=[source],
+            evidence_entries=[evidence],
+        )
+        self.assertEqual(result["outOfBoundaryCitations"], [])
+
     def test_number_ranges_expand_every_reference(self) -> None:
         source = {"localLocator": ".science/sources/paper.md", "title": "Paper"}
         result = audit_citations(
@@ -605,14 +615,30 @@ class CitationAuditTests(unittest.TestCase):
         )
         for text, claim in cases:
             with self.subTest(text=text):
-                source, evidence = verified_pair(claim, citation_number=1)
-                result = audit_citations(
-                    text=text,
-                    active_sources=[source],
-                    registered_sources=[source],
-                    evidence_entries=[evidence],
-                )
-                self.assertEqual(result["outOfBoundaryCitations"], [])
+                self.assert_claim_authorized(text, claim)
+
+    def test_technical_token_periods_do_not_narrow_the_claim(self) -> None:
+        cases = (
+            (
+                "The result in manuscript.md is supported [1].",
+                "The result in manuscript.md is supported",
+                "md is supported",
+            ),
+            (
+                "See example.com for details [1].",
+                "See example.com for details",
+                "com for details",
+            ),
+        )
+        for text, full_claim, narrow_claim in cases:
+            with self.subTest(text=text):
+                self.assert_single_claim_contract(text, full_claim, narrow_claim)
+
+    def test_separator_after_no_space_period_does_not_merge_claims(self) -> None:
+        self.assert_claim_authorized(
+            "The result was supported.Next: result was rejected [1].",
+            "next: result was rejected",
+        )
 
     def test_sentence_initial_coordination_is_part_of_the_claim(self) -> None:
         self.assert_single_claim_contract(
