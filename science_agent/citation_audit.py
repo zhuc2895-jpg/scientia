@@ -155,15 +155,36 @@ _DOMAIN_SUFFIXES = frozenset({
     "ai", "app", "ca", "cn", "co", "com", "de", "dev", "edu", "eu", "fr", "gov",
     "info", "io", "jp", "net", "org", "uk", "us", "xyz",
 })
-_TECHNICAL_TOKEN_SUFFIXES = _FILE_SUFFIXES | _DOMAIN_SUFFIXES
 _INITIAL_CONTEXT_WORDS = frozenset({
     "and", "by", "from", "of", "or", "variable", "with",
 })
-_LABEL_CONTEXT_WORDS = frozenset({
-    "appendix", "case", "equation", "figure", "item", "part", "phase", "point",
-    "result", "section", "step", "table", "value", "version",
-})
-_MATH_VARIABLE_LETTERS = frozenset("CFKMNPQRSTXYZ")
+_LABEL_CONTEXT_WORDS = frozenset({"result"})
+_VARIABLE_SYMBOL_LETTERS = frozenset({"X"})
+
+
+def _is_technical_token_suffix(suffix: str) -> bool:
+    return suffix in _FILE_SUFFIXES or suffix in _DOMAIN_SUFFIXES
+
+
+def _is_initial_period(text: str, index: int, char_before: str) -> bool:
+    letter_start = index - 1
+    if not char_before.isupper() or (letter_start > 0 and text[letter_start - 1].isalnum()):
+        return False
+    preceding_word = re.search(r"([A-Za-z][A-Za-z'’-]*)\s+$", text[:letter_start])
+    following = re.search(r"\S", text[index + 1:])
+    if not following or not following.group(0).isupper():
+        return False
+    if letter_start == 0 or text[letter_start - 1] in "([{":
+        return True
+    if preceding_word:
+        word = preceding_word.group(1)
+        if word.lower() == "variable" and char_before in _VARIABLE_SYMBOL_LETTERS:
+            return False
+        if word.lower() in _INITIAL_CONTEXT_WORDS:
+            return True
+        if word[0].isupper() and word.lower() not in _LABEL_CONTEXT_WORDS:
+            return True
+    return bool(re.search(r"(?:^|[\s([{])([A-Z])\.$", text[:letter_start].rstrip()))
 
 
 def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
@@ -187,25 +208,8 @@ def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
         suffix_end = index + 1
         while suffix_end < len(text) and text[suffix_end].isalnum():
             suffix_end += 1
-        return text[index + 1:suffix_end].lower() in _TECHNICAL_TOKEN_SUFFIXES
-    letter_start = index - 1
-    if char_before.isupper() and (letter_start == 0 or not text[letter_start - 1].isalnum()):
-        preceding_word = re.search(r"([A-Za-z][A-Za-z'’-]*)\s+$", text[:letter_start])
-        following = re.search(r"\S", text[index + 1:])
-        if not following or not following.group(0).isupper():
-            return False
-        if letter_start == 0 or text[letter_start - 1] in "([{":
-            return True
-        if preceding_word:
-            word = preceding_word.group(1)
-            if word.lower() == "variable" and char_before in _MATH_VARIABLE_LETTERS:
-                return False
-            if word.lower() in _INITIAL_CONTEXT_WORDS:
-                return True
-            if word[0].isupper() and word.lower() not in _LABEL_CONTEXT_WORDS:
-                return True
-        return bool(re.search(r"(?:^|[\s([{])([A-Z])\.$", text[:letter_start].rstrip()))
-    return False
+        return _is_technical_token_suffix(text[index + 1:suffix_end].lower())
+    return _is_initial_period(text, index, char_before)
 
 
 def _is_claim_boundary(text: str, index: int) -> bool:

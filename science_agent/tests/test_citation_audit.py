@@ -727,6 +727,10 @@ class CitationAuditTests(unittest.TestCase):
             "The variable X. Beta was rejected [1].",
             "Beta was rejected",
         )
+        self.assert_claim_rejected(
+            "The variable X. Beta was rejected [1].",
+            "The variable X. Beta was rejected",
+        )
 
     def test_middle_initial_after_a_label_does_not_narrow_the_claim(self) -> None:
         self.assert_single_claim_contract(
