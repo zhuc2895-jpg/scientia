@@ -54,7 +54,7 @@ def verified_pair(claim: str, locator: str = ".science/sources/paper.md", *, sou
 
 
 class CitationAuditTests(unittest.TestCase):
-    def _audit_claim(self, text: str, claim: str):
+    def _audit_text_with_claim(self, text: str, claim: str):
         source, evidence = verified_pair(claim, citation_number=1)
         return audit_citations(
             text=text,
@@ -64,14 +64,14 @@ class CitationAuditTests(unittest.TestCase):
         )
 
     def assert_single_claim_contract(self, text: str, full_claim: str, narrow_claim: str) -> None:
-        narrow_result = self._audit_claim(text, narrow_claim)
+        narrow_result = self._audit_text_with_claim(text, narrow_claim)
         self.assertEqual(narrow_result["outOfBoundaryCitations"], ["[1]"])
 
-        full_result = self._audit_claim(text, full_claim)
+        full_result = self._audit_text_with_claim(text, full_claim)
         self.assertEqual(full_result["outOfBoundaryCitations"], [])
 
     def assert_claim_authorized(self, text: str, claim: str) -> None:
-        result = self._audit_claim(text, claim)
+        result = self._audit_text_with_claim(text, claim)
         self.assertEqual(result["outOfBoundaryCitations"], [])
 
     def test_number_ranges_expand_every_reference(self) -> None:
@@ -614,6 +614,7 @@ class CitationAuditTests(unittest.TestCase):
             ("Result X. Beta was rejected [1].", "Beta was rejected"),
             ("The result was supported.Next result was rejected [1].", "Next result was rejected"),
             ("The result was supported.next result was rejected [1].", "next result was rejected"),
+            ("The study used NLP. Beta was rejected [1].", "Beta was rejected"),
         )
         for text, claim in cases:
             with self.subTest(text=text):
@@ -646,6 +647,21 @@ class CitationAuditTests(unittest.TestCase):
                 r"See data\\report.md for details",
                 r"report.md for details",
             ),
+            (
+                "The result in main.go is supported [1].",
+                "The result in main.go is supported",
+                "go is supported",
+            ),
+            (
+                "See notes.rst for details [1].",
+                "See notes.rst for details",
+                "rst for details",
+            ),
+            (
+                "See example.xyz for details [1].",
+                "See example.xyz for details",
+                "xyz for details",
+            ),
         )
         for text, full_claim, narrow_claim in cases:
             with self.subTest(text=text):
@@ -655,6 +671,19 @@ class CitationAuditTests(unittest.TestCase):
         self.assert_claim_authorized(
             "The result was supported.Next: result was rejected [1].",
             "next: result was rejected",
+        )
+
+    def test_capital_variable_after_a_verb_is_a_sentence_boundary(self) -> None:
+        self.assert_claim_authorized(
+            "We measured X. Beta was rejected [1].",
+            "Beta was rejected",
+        )
+
+    def test_middle_initial_after_a_label_does_not_narrow_the_claim(self) -> None:
+        self.assert_single_claim_contract(
+            "The variable J. Smith was rejected [1].",
+            "The variable J. Smith was rejected",
+            "Smith was rejected",
         )
 
     def test_sentence_initial_coordination_is_part_of_the_claim(self) -> None:

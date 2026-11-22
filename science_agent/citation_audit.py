@@ -146,15 +146,15 @@ def _is_abbreviation_period(text: str, index: int) -> bool:
     return any(prefix.endswith(abbreviation) for abbreviation in ("et al.", "e.g.", "i.e.", "dr.", "mr.", "ms.", "prof.", "vs."))
 
 
-_TECHNICAL_SUFFIXES = frozenset({
+# Case-insensitive suffixes for supported Source formats and common domain names.
+_TECHNICAL_TOKEN_SUFFIXES = frozenset({
     "ai", "app", "bib", "ca", "cn", "co", "com", "csv", "de", "dev", "docx", "edu",
-    "eu", "fr", "gov", "htm", "html", "info", "io", "ipynb", "jp", "jpeg", "jpg",
-    "json", "md", "net", "org", "pdf", "png", "py", "ris", "svg", "tex", "txt", "uk",
-    "us", "xml", "yaml", "yml", "zip",
+    "eu", "fr", "go", "gov", "htm", "html", "info", "io", "ipynb", "jp", "jpeg",
+    "jpg", "json", "md", "net", "org", "pdf", "png", "py", "ris", "rst", "svg",
+    "tex", "txt", "uk", "us", "xml", "xyz", "yaml", "yml", "zip",
 })
-_VARIABLE_CONTEXT_WORDS = frozenset({
-    "appendix", "case", "equation", "figure", "item", "part", "phase", "point",
-    "result", "section", "step", "table", "value", "variable", "version",
+_INITIAL_CONTEXT_WORDS = frozenset({
+    "and", "by", "from", "of", "or", "variable", "with",
 })
 
 
@@ -179,14 +179,15 @@ def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
         suffix_end = index + 1
         while suffix_end < len(text) and text[suffix_end].isalnum():
             suffix_end += 1
-        return text[index + 1:suffix_end].lower() in _TECHNICAL_SUFFIXES
+        return text[index + 1:suffix_end].lower() in _TECHNICAL_TOKEN_SUFFIXES
     letter_start = index - 1
     if char_before.isupper() and (letter_start == 0 or not text[letter_start - 1].isalnum()):
         preceding_word = re.search(r"([A-Za-z][A-Za-z'’-]*)\s+$", text[:letter_start])
-        if preceding_word and preceding_word.group(1).lower() in _VARIABLE_CONTEXT_WORDS:
-            return False
-        following = re.search(r"\S", text[index + 1:])
-        return bool(following and following.group(0).isupper())
+        if letter_start == 0 or text[letter_start - 1] in "([{" or (
+            preceding_word and preceding_word.group(1).lower() in _INITIAL_CONTEXT_WORDS
+        ):
+            following = re.search(r"\S", text[index + 1:])
+            return bool(following and following.group(0).isupper())
     return False
 
 
