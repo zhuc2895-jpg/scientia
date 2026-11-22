@@ -162,11 +162,18 @@ _LABEL_CONTEXT_WORDS = frozenset({"result"})
 _VARIABLE_SYMBOL_LETTERS = frozenset({"X"})
 
 
-def _is_technical_token_suffix(suffix: str) -> bool:
-    return suffix in _FILE_SUFFIXES or suffix in _DOMAIN_SUFFIXES
+def _is_file_token(token: str, suffix: str) -> bool:
+    return suffix in _FILE_SUFFIXES and bool(re.search(r"[./\\][A-Za-z0-9]+$", token))
 
 
-def _is_initial_period(text: str, index: int, char_before: str) -> bool:
+def _is_domain_token(token: str, suffix: str) -> bool:
+    return suffix in _DOMAIN_SUFFIXES and bool(
+        re.fullmatch(r"(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}", token)
+    )
+
+
+def _is_initial_period(text: str, index: int) -> bool:
+    char_before = text[index - 1] if index > 0 else ""
     letter_start = index - 1
     if not char_before.isupper() or (letter_start > 0 and text[letter_start - 1].isalnum()):
         return False
@@ -208,8 +215,9 @@ def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
         suffix_end = index + 1
         while suffix_end < len(text) and text[suffix_end].isalnum():
             suffix_end += 1
-        return _is_technical_token_suffix(text[index + 1:suffix_end].lower())
-    return _is_initial_period(text, index, char_before)
+        suffix = text[index + 1:suffix_end].lower()
+        return _is_file_token(token, suffix) or _is_domain_token(token, suffix)
+    return _is_initial_period(text, index)
 
 
 def _is_claim_boundary(text: str, index: int) -> bool:

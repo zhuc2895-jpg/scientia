@@ -629,6 +629,16 @@ class CitationAuditTests(unittest.TestCase):
                 "Smith was rejected",
             ),
             (
+                "The variable C. Smith was rejected [1].",
+                "The variable C. Smith was rejected",
+                "Smith was rejected",
+            ),
+            (
+                "The variable Y. Smith was rejected [1].",
+                "The variable Y. Smith was rejected",
+                "Smith was rejected",
+            ),
+            (
                 "John J. Smith was rejected [1].",
                 "John J. Smith was rejected",
                 "Smith was rejected",
