@@ -692,6 +692,16 @@ class CitationAuditTests(unittest.TestCase):
                 "COM for details",
             ),
             (
+                "See example.com, which reports details [1].",
+                "See example.com, which reports details",
+                "which reports details",
+            ),
+            (
+                "See main.go, which reports details [1].",
+                "See main.go, which reports details",
+                "which reports details",
+            ),
+            (
                 r"See data\\report.md for details [1].",
                 r"See data\\report.md for details",
                 r"report.md for details",

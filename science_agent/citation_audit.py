@@ -162,13 +162,25 @@ _LABEL_CONTEXT_WORDS = frozenset({"result"})
 _VARIABLE_SYMBOL_LETTERS = frozenset({"X"})
 
 
-def _is_file_token(token: str, suffix: str) -> bool:
-    return suffix in _FILE_SUFFIXES and bool(re.search(r"[./\\][A-Za-z0-9]+$", token))
+def _trim_token_punctuation(token: str) -> str:
+    return token.strip("()[]{}.,;:!?\"'")
 
 
-def _is_domain_token(token: str, suffix: str) -> bool:
-    return suffix in _DOMAIN_SUFFIXES and bool(
-        re.fullmatch(r"(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}", token)
+def _token_suffix(token: str) -> str:
+    return token.rsplit(".", 1)[-1].lower() if "." in token else ""
+
+
+def _is_file_token(token: str) -> bool:
+    cleaned = _trim_token_punctuation(token)
+    return _token_suffix(cleaned) in _FILE_SUFFIXES and bool(
+        re.search(r"[./\\][A-Za-z0-9]+$", cleaned)
+    )
+
+
+def _is_domain_token(token: str) -> bool:
+    cleaned = _trim_token_punctuation(token)
+    return _token_suffix(cleaned) in _DOMAIN_SUFFIXES and bool(
+        re.fullmatch(r"(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}", cleaned)
     )
 
 
@@ -215,8 +227,7 @@ def _period_belongs_to_token_or_initial(text: str, index: int) -> bool:
         suffix_end = index + 1
         while suffix_end < len(text) and text[suffix_end].isalnum():
             suffix_end += 1
-        suffix = text[index + 1:suffix_end].lower()
-        return _is_file_token(token, suffix) or _is_domain_token(token, suffix)
+        return _is_file_token(token) or _is_domain_token(token)
     return _is_initial_period(text, index)
 
 
